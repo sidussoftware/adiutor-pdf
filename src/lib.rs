@@ -1,6 +1,7 @@
 //! adiutor-pdf: a small desktop app for PDF page operations.
 
 pub mod ranges;
+pub mod workspace;
 
 struct App;
 
