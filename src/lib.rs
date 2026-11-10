@@ -1,5 +1,7 @@
 //! adiutor-pdf: a small desktop app for PDF page operations.
 
+pub mod ranges;
+
 struct App;
 
 impl eframe::App for App {
