@@ -208,19 +208,34 @@ fn canonical(p: &Path) -> Option<String> {
         let parent = std::fs::canonicalize(p.parent()?).ok()?;
         Some(parent.join(p.file_name()?))
     })?;
-    let s = c.to_string_lossy().into_owned();
-    // Windows and macOS file systems are case-insensitive by default.
-    Some(if cfg!(any(windows, target_os = "macos")) {
+    Some(fs_key(&c.to_string_lossy(), FOLD_CASE))
+}
+
+/// Windows and macOS file systems are case-insensitive by default.
+const FOLD_CASE: bool = cfg!(any(windows, target_os = "macos"));
+
+/// Comparison key for file names and paths.
+fn fs_key(s: &str, fold_case: bool) -> String {
+    if fold_case {
         s.to_lowercase()
     } else {
-        s
-    })
+        s.to_string()
+    }
 }
 
 /// File names for Split, one per group (0-based positions), unique among
 /// themselves and against `existing`. Clashes get " (2)", " (3)", ... before ".pdf".
 pub fn split_names(stem: &str, groups: &[Vec<usize>], existing: &HashSet<String>) -> Vec<String> {
-    let mut used = existing.clone();
+    split_names_with(stem, groups, existing, FOLD_CASE)
+}
+
+fn split_names_with(
+    stem: &str,
+    groups: &[Vec<usize>],
+    existing: &HashSet<String>,
+    fold_case: bool,
+) -> Vec<String> {
+    let mut used: HashSet<String> = existing.iter().map(|n| fs_key(n, fold_case)).collect();
     groups
         .iter()
         .map(|g| {
@@ -235,11 +250,11 @@ pub fn split_names(stem: &str, groups: &[Vec<usize>], existing: &HashSet<String>
             };
             let mut name = format!("{base}.pdf");
             let mut n = 2;
-            while used.contains(&name) {
+            while used.contains(&fs_key(&name, fold_case)) {
                 name = format!("{base} ({n}).pdf");
                 n += 1;
             }
-            used.insert(name.clone());
+            used.insert(fs_key(&name, fold_case));
             name
         })
         .collect()
@@ -360,6 +375,20 @@ mod tests {
         let existing = HashSet::from(["doc_p1.pdf".to_string()]);
         let names = split_names("doc", &[vec![0], vec![0]], &existing);
         assert_eq!(names, ["doc_p1 (2).pdf", "doc_p1 (3).pdf"]);
+    }
+
+    #[test]
+    fn split_names_fold_case_when_requested() {
+        let existing = HashSet::from(["Doc_p1.PDF".to_string()]);
+        let g = [vec![0]];
+        assert_eq!(
+            split_names_with("doc", &g, &existing, true),
+            ["doc_p1 (2).pdf"]
+        );
+        assert_eq!(
+            split_names_with("doc", &g, &existing, false),
+            ["doc_p1.pdf"]
+        );
     }
 
     #[test]
