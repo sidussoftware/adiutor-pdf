@@ -1,5 +1,6 @@
 //! adiutor-pdf: a small desktop app for PDF page operations.
 
+pub mod i18n;
 pub mod ranges;
 pub mod workspace;
 
