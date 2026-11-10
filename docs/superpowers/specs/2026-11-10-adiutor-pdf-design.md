@@ -1,7 +1,7 @@
 # adiutor-pdf — Design (v0.1)
 
 Date: 2026-11-10
-Status: draft, awaiting owner review
+Status: approved by owner on 2026-11-10
 
 ## 1. Goal
 
@@ -64,7 +64,8 @@ A single workspace window:
 - Every operation is the same flow: build the page list in the grid, then save.
   - Merge = add several files, **Save all as one PDF**.
   - Extract = select pages, **Save selection**.
-  - Split = **Split** into one file per page or per range, written to a chosen folder.
+  - Split = **Split** uses the Pages field: each comma-separated group becomes one file (`1-3, 4-6, 7` gives
+    3 files). If the field is empty, every page becomes its own file. Output goes to a chosen folder.
   - Reorder / delete = edit the grid.
 - **Page numbers refer to the current position in the grid** (1..N across all loaded files), not to the original page numbers in each file. Reordering the grid renumbers it.
 - Adding the same file twice is allowed; its pages appear twice.
@@ -102,8 +103,9 @@ One Rust crate (binary), split into modules with one job each.
 - **`workspace`**: the core logic. Holds a list of page references (`source document id`, `page index`) in the
   current order, plus the selection. Reorder, delete and select are operations on this list only: instant, no file
   I/O. Also generates the automatic file names for Split. No dependency on egui or PDFium.
-- **`ranges`**: parses and validates page range input against the current page count, returning page positions
-  or an error describing the problem.
+- **`ranges`**: parses and validates page range input against the current page count, returning the page
+  positions grouped per comma-separated item (one group = one output file for Split), or an error describing the
+  problem.
 - **`engine`**: runs on a dedicated worker thread and is the only code that touches PDFium (PDFium is not
   thread-safe). Receives commands over a channel, sends results back, and wakes the UI with `request_repaint`.
 - **`ui`**: draws state and sends commands. Holds no business logic.
@@ -157,7 +159,7 @@ All MIT/Apache-2.0 or compatible:
 | File is not a PDF or is corrupted | Message "Cannot open `x.pdf`: <reason>"; other files in the same drop still load |
 | Encrypted PDF | Password dialog; wrong password asks again; Cancel skips that file |
 | Invalid page input | Field turns red with the reason (for example "page 12 does not exist (total 10)", "invalid format") |
-| Empty selection | **Save selection** and **Split** are disabled |
+| Empty selection | **Save selection** is disabled (**Split** with an empty Pages field splits every page) |
 | Save destination is one of the open source files | Save is blocked: "Choose another name; the original is never overwritten" |
 | Disk full / no permission | Message with the cause; temp file removed; workspace unchanged so the user can retry |
 | Source file moved or deleted after opening | Save fails with a clear message; no partial output |
