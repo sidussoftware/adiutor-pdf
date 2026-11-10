@@ -1,0 +1,38 @@
+name: CI
+
+on: [push, pull_request]
+
+jobs:
+  check:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            platform: linux-x64
+            lib_dir: pdfium/lib
+          - os: windows-latest
+            platform: win-x64
+            lib_dir: pdfium/bin
+          - os: macos-latest
+            platform: mac-arm64
+            lib_dir: pdfium/lib
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Install Linux dev packages
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libwayland-dev
+      - name: Fetch PDFium
+        shell: bash
+        run: bash scripts/fetch-pdfium.sh ${{ matrix.platform }} pdfium
+      - name: Point tests at PDFium
+        shell: bash
+        run: echo "ADIUTOR_PDFIUM_DIR=${{ github.workspace }}/${{ matrix.lib_dir }}" >> "$GITHUB_ENV"
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo test
