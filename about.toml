@@ -30,3 +30,69 @@ checksum = "6dc0e068dcf3a5bc8e054205b85b7720e1d49265bbc64bf515d2cf79197df69a"
 path = "LICENSE-LIBM-MIT"
 license = "MIT"
 checksum = "9eff396a99bafd208e7126602420d6864f6066c08b84485a5b032320a9c01997"
+
+# MIT-only crates whose packaged MIT text has no copyright line: take the license file from the upstream repo at
+# the published commit (.cargo_vcs_info.json). A clarification is keyed by crate name only; for a version whose
+# commit lacks the file (the 0.6-era objc2 crates, whose LICENSE.md names no holder) cargo-about warns and keeps
+# the packaged license.
+[block2.clarify]
+license = "MIT"
+
+[[block2.clarify.git]]
+path = "LICENSE.txt"
+checksum = "e353f37b12aefbb9f9b29490e837cfee05d9bda70804b3562839a3285c1df1e5"
+
+[objc-sys.clarify]
+license = "MIT"
+
+[[objc-sys.clarify.git]]
+path = "LICENSE.txt"
+checksum = "e353f37b12aefbb9f9b29490e837cfee05d9bda70804b3562839a3285c1df1e5"
+
+[objc2.clarify]
+license = "MIT"
+
+[[objc2.clarify.git]]
+path = "LICENSE.txt"
+checksum = "e353f37b12aefbb9f9b29490e837cfee05d9bda70804b3562839a3285c1df1e5"
+
+[objc2-app-kit.clarify]
+license = "MIT"
+
+[[objc2-app-kit.clarify.git]]
+path = "LICENSE.txt"
+checksum = "e353f37b12aefbb9f9b29490e837cfee05d9bda70804b3562839a3285c1df1e5"
+
+[objc2-foundation.clarify]
+license = "MIT"
+
+[[objc2-foundation.clarify.git]]
+path = "LICENSE.txt"
+checksum = "e353f37b12aefbb9f9b29490e837cfee05d9bda70804b3562839a3285c1df1e5"
+
+[zvariant_utils.clarify]
+license = "MIT"
+
+[[zvariant_utils.clarify.git]]
+path = "LICENSE-MIT"
+checksum = "260e4ff3fc493695880c90774283eb1e3d018f898fabe655bbd52dd2cbd2fcad"
+
+# The upstream COPYRIGHT notice names no holder but states who keeps the copyright.
+[winnow.clarify]
+license = "MIT"
+
+[[winnow.clarify.files]]
+path = "LICENSE-MIT"
+checksum = "cb5aedb296c5246d1f22e9099f925a65146f9f0d6b4eebba97fd27a6cdbbab2d"
+
+[[winnow.clarify.git]]
+path = "COPYRIGHT"
+checksum = "472ecdadaee65c564f323a4fcb3f1ef21a23bd51dddb6d8d336f32122a680cd1"
+
+# Auto-detection picks the bundled generic LICENSES/MIT.txt instead of the crate's own LICENSE.txt.
+[wayland-protocols-plasma.clarify]
+license = "MIT"
+
+[[wayland-protocols-plasma.clarify.files]]
+path = "LICENSE.txt"
+checksum = "1cb6f4dee8c649f175736380495f0af0c753c87f22d50931692968bb24bf2161"
