@@ -2,6 +2,7 @@
 
 use crate::engine::{Command, Engine, Event};
 use crate::i18n::Tr;
+use crate::ranges::{self, RangeError};
 use crate::thumb_cache::ThumbCache;
 use crate::workspace::{PageRef, SourceDoc, Workspace};
 use eframe::egui::{self, Color32, Sense, TextureHandle, TextureOptions, vec2};
@@ -13,6 +14,8 @@ const THUMB_WIDTH: f32 = 150.0;
 const LABEL_HEIGHT: f32 = 20.0;
 const GAP: f32 = 12.0;
 
+type GridAction = Box<dyn FnOnce(&mut Workspace)>;
+
 pub struct AdiutorApp {
     /// Err = why the engine could not start; shown instead of the grid.
     engine: Result<Engine, String>,
@@ -23,6 +26,24 @@ pub struct AdiutorApp {
     last_visible: Vec<PageRef>,
     /// One-line message for the user (open failures, internal error).
     message: Option<String>,
+    /// Contents of the Pages field and the translated parse error shown under it.
+    pages_text: String,
+    pages_error: Option<String>,
+}
+
+fn range_error_text(tr: &Tr, e: &RangeError) -> String {
+    match e {
+        RangeError::InvalidFormat { item } => tr.tf("range.invalid_format", &[("item", item)]),
+        RangeError::ZeroPage => tr.t("range.zero_page").to_string(),
+        RangeError::OutOfRange { page, total } => tr.tf(
+            "range.out_of_range",
+            &[("page", &page.to_string()), ("total", &total.to_string())],
+        ),
+        RangeError::Reversed { start, end } => tr.tf(
+            "range.reversed",
+            &[("start", &start.to_string()), ("end", &end.to_string())],
+        ),
+    }
 }
 
 impl AdiutorApp {
@@ -36,6 +57,8 @@ impl AdiutorApp {
             cache: ThumbCache::new(THUMB_CACHE_CAP),
             last_visible: Vec::new(),
             message: None,
+            pages_text: String::new(),
+            pages_error: None,
         };
         for path in startup_paths {
             app.open(path);
@@ -125,7 +148,37 @@ impl AdiutorApp {
                     self.open(path);
                 }
             }
+            ui.label(self.tr.t("toolbar.pages"));
+            let red = ui.visuals().error_fg_color;
+            let stroke = if self.pages_error.is_some() {
+                egui::Stroke::new(1.5, red)
+            } else {
+                egui::Stroke::NONE
+            };
+            let edit = egui::Frame::new()
+                .stroke(stroke)
+                .corner_radius(3.0)
+                .show(ui, |ui| {
+                    ui.add(egui::TextEdit::singleline(&mut self.pages_text).desired_width(160.0))
+                })
+                .inner;
+            if edit.changed() {
+                self.pages_error = None;
+            }
+            let enter = edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+            if ui.button(self.tr.t("toolbar.select")).clicked() || enter {
+                match ranges::parse(&self.pages_text, self.workspace.len()) {
+                    Ok(groups) => {
+                        self.pages_error = None;
+                        self.workspace.set_selection(&groups.concat());
+                    }
+                    Err(e) => self.pages_error = Some(range_error_text(&self.tr, &e)),
+                }
+            }
         });
+        if let Some(err) = &self.pages_error {
+            ui.colored_label(ui.visuals().error_fg_color, err);
+        }
     }
 
     fn grid(&mut self, ui: &mut egui::Ui) {
@@ -134,6 +187,9 @@ impl AdiutorApp {
             return;
         }
         let mut visible: Vec<PageRef> = Vec::new();
+        let mut action: Option<GridAction> = None;
+        let mut marker: Option<(f32, f32, f32)> = None; // x, top, bottom
+        let dragging = egui::DragAndDrop::has_payload_of_type::<usize>(ui.ctx());
         egui::ScrollArea::vertical()
             .auto_shrink(false)
             .show(ui, |ui| {
@@ -146,10 +202,40 @@ impl AdiutorApp {
                         } else {
                             THUMB_WIDTH * 1.4
                         };
-                        let (rect, _) = ui.allocate_exact_size(
+                        let (rect, resp) = ui.allocate_exact_size(
                             vec2(THUMB_WIDTH, thumb_h + LABEL_HEIGHT),
-                            Sense::hover(),
+                            Sense::click_and_drag(),
                         );
+                        resp.dnd_set_drag_payload(pos);
+                        let mods = ui.input(|i| i.modifiers);
+                        if resp.drag_started() && !self.workspace.is_selected(pos) {
+                            action = Some(Box::new(move |w| w.select_only(pos)));
+                        } else if resp.clicked() {
+                            action = Some(Box::new(move |w| {
+                                if mods.command {
+                                    w.toggle(pos)
+                                } else if mods.shift {
+                                    w.select_range_to(pos)
+                                } else {
+                                    w.select_only(pos)
+                                }
+                            }));
+                        }
+                        if dragging && resp.contains_pointer() {
+                            let after = ui
+                                .input(|i| i.pointer.interact_pos())
+                                .is_some_and(|p| p.x >= rect.center().x);
+                            let target = pos + usize::from(after);
+                            let x = if after { rect.right() } else { rect.left() };
+                            marker = Some((
+                                x + if after { GAP / 2.0 } else { -GAP / 2.0 },
+                                rect.top(),
+                                rect.bottom(),
+                            ));
+                            if resp.dnd_release_payload::<usize>().is_some() {
+                                action = Some(Box::new(move |w| w.move_selected_to(target)));
+                            }
+                        }
                         if !ui.is_rect_visible(rect) {
                             continue;
                         }
@@ -180,9 +266,38 @@ impl AdiutorApp {
                             egui::FontId::proportional(13.0),
                             ui.visuals().text_color(),
                         );
+                        if self.workspace.is_selected(pos) {
+                            // Thick frame plus a check badge, so selection is not color-only.
+                            let accent = ui.visuals().selection.bg_fill;
+                            ui.painter().rect_stroke(
+                                rect.expand(3.0),
+                                3.0,
+                                egui::Stroke::new(3.0, accent),
+                                egui::StrokeKind::Inside,
+                            );
+                            let c = img_rect.left_top() + vec2(14.0, 14.0);
+                            ui.painter().circle_filled(c, 10.0, accent);
+                            ui.painter().line(
+                                vec![
+                                    c + vec2(-4.5, 0.0),
+                                    c + vec2(-1.0, 3.5),
+                                    c + vec2(5.0, -3.5),
+                                ],
+                                egui::Stroke::new(2.0, Color32::WHITE),
+                            );
+                        }
                     }
                 });
+                if let Some((x, top, bottom)) = marker {
+                    ui.painter().line_segment(
+                        [egui::pos2(x, top), egui::pos2(x, bottom)],
+                        egui::Stroke::new(3.0, ui.visuals().selection.bg_fill),
+                    );
+                }
             });
+        if let Some(f) = action {
+            f(&mut self.workspace);
+        }
         if visible != self.last_visible {
             let width_px = (THUMB_WIDTH * ui.ctx().pixels_per_point()).round() as u32;
             self.last_visible = visible.clone();
@@ -213,6 +328,13 @@ impl eframe::App for AdiutorApp {
         });
         for path in dropped {
             self.open(path);
+        }
+
+        let delete = !ctx.egui_wants_keyboard_input()
+            && ctx
+                .input(|i| i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace));
+        if delete {
+            self.workspace.delete_selected();
         }
 
         if let Err(reason) = &self.engine {
