@@ -1,5 +1,6 @@
 //! Main window: toolbar, thumbnail grid and bottom bar.
 
+use crate::batch::Batch;
 use crate::engine::{Command, Engine, Event};
 use crate::i18n::{Lang, Tr};
 use crate::ranges::{self, RangeError};
@@ -37,8 +38,6 @@ pub struct AdiutorApp {
     next_job: u64,
     /// The running save or split, if any.
     batch: Option<Batch>,
-    /// Latest `SaveProgress` of the running batch.
-    progress: Option<(usize, usize)>,
     /// Encrypted files waiting for a password (path, previous attempt was wrong).
     passwords: VecDeque<(PathBuf, bool)>,
     password_text: String,
@@ -49,24 +48,6 @@ pub struct AdiutorApp {
     closing: bool,
     /// The engine thread ended; its error was already shown.
     engine_dead: bool,
-}
-
-/// Jobs of one Save or Split that have not finished yet.
-struct Batch {
-    pending: HashSet<u64>,
-    ok: usize,
-    failed: bool,
-    /// Some for a split: the destination folder.
-    split_folder: Option<PathBuf>,
-    /// The page list when the batch started; `mark_saved` only if it is unchanged at the end.
-    pages: Vec<PageRef>,
-    /// The jobs write every page of `pages`, in order (Save all, or a full split).
-    covers_all: bool,
-}
-
-/// True if the jobs' pages, concatenated in job order, are exactly `all`.
-fn covers_all(jobs: &[(Vec<PageRef>, PathBuf)], all: &[PageRef]) -> bool {
-    jobs.iter().flat_map(|(pages, _)| pages).eq(all)
 }
 
 fn range_error_text(tr: &Tr, e: &RangeError) -> String {
@@ -131,7 +112,6 @@ impl AdiutorApp {
             pages_error: None,
             next_job: 0,
             batch: None,
-            progress: None,
             passwords: VecDeque::new(),
             password_text: String::new(),
             close_prompt: false,
@@ -155,6 +135,8 @@ impl AdiutorApp {
 
     /// Shows the internal error once, however often the dead engine is used.
     fn engine_died(&mut self) {
+        // No more events will come: unblock Save and Split.
+        self.batch = None;
         if !std::mem::replace(&mut self.engine_dead, true) {
             self.error(self.tr.t("error.internal").to_string());
         }
@@ -218,13 +200,13 @@ impl AdiutorApp {
                     self.error(text);
                 }
                 Event::PasswordRequired { path, wrong } => self.passwords.push_back((path, wrong)),
-                Event::SaveProgress { done, total, .. } => self.progress = Some((done, total)),
+                Event::SaveProgress { job, done, .. } => {
+                    if let Some(b) = &mut self.batch {
+                        b.progress(job, done);
+                    }
+                }
                 Event::Saved { job, dest } => {
-                    if self
-                        .batch
-                        .as_ref()
-                        .is_some_and(|b| b.split_folder.is_none())
-                    {
+                    if self.batch.as_ref().is_some_and(|b| !b.is_split()) {
                         let text = self.tr.tf("save.done", &[("file", &file_name(&dest))]);
                         self.messages.push(text);
                     }
@@ -243,30 +225,26 @@ impl AdiutorApp {
     }
 
     fn finish_job(&mut self, job: u64, ok: bool) {
-        let Some(b) = &mut self.batch else { return };
-        if !b.pending.remove(&job) {
+        let current = self.workspace.all_pages();
+        let Some(outcome) = self
+            .batch
+            .as_mut()
+            .and_then(|b| b.finish(job, ok, &current))
+        else {
             return;
-        }
-        b.ok += usize::from(ok);
-        b.failed |= !ok;
-        if !b.pending.is_empty() {
-            return;
-        }
-        let b = self.batch.take().expect("checked above");
-        self.progress = None;
-        if let Some(folder) = &b.split_folder
-            && b.ok > 0
-        {
+        };
+        self.batch = None;
+        if let Some((count, folder)) = outcome.split_done {
             let text = self.tr.tf(
                 "split.done",
                 &[
-                    ("count", &b.ok.to_string()),
+                    ("count", &count.to_string()),
                     ("folder", &folder.to_string_lossy()),
                 ],
             );
             self.messages.push(text);
         }
-        if !b.failed && b.covers_all && self.workspace.all_pages() == b.pages {
+        if outcome.mark_saved {
             self.workspace.mark_saved();
         }
     }
@@ -278,24 +256,12 @@ impl AdiutorApp {
             self.messages.push(text);
             return;
         }
-        let pages = self.workspace.all_pages();
-        let covers_all = covers_all(&jobs, &pages);
-        let mut pending = HashSet::new();
-        for (pages, dest) in jobs {
-            let job = self.next_job;
-            self.next_job += 1;
-            pending.insert(job);
+        let all = self.workspace.all_pages();
+        let (batch, send) = Batch::new(jobs, all, split_folder, &mut self.next_job);
+        self.batch = Some(batch);
+        for (job, pages, dest) in send {
             self.send(Command::Save { job, pages, dest });
         }
-        self.progress = None;
-        self.batch = Some(Batch {
-            pending,
-            ok: 0,
-            failed: false,
-            split_folder,
-            pages,
-            covers_all,
-        });
     }
 
     fn save(&mut self, selection_only: bool) {
@@ -591,8 +557,8 @@ impl AdiutorApp {
     }
 
     fn bottom_bar(&mut self, ui: &mut egui::Ui) {
-        if self.batch.is_some() {
-            let (done, total) = self.progress.unwrap_or((0, 1));
+        if let Some(b) = &self.batch {
+            let (done, total) = b.total_progress();
             let text = self.tr.tf(
                 "save.progress",
                 &[("done", &done.to_string()), ("total", &total.to_string())],
@@ -747,29 +713,5 @@ impl eframe::App for AdiutorApp {
         self.password_modal(&ctx);
         self.overwrite_modal(&ctx);
         self.close_modal(&ctx);
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn p(index: u32) -> PageRef {
-        PageRef { doc: 0, index }
-    }
-
-    #[test]
-    fn covers_all_only_for_every_page_in_order() {
-        let all = [p(0), p(1), p(2)];
-        let job = |pages: &[PageRef]| (pages.to_vec(), PathBuf::new());
-        assert!(covers_all(&[job(&all)], &all));
-        assert!(covers_all(&[job(&[p(0)]), job(&[p(1), p(2)])], &all));
-        assert!(!covers_all(&[job(&[p(0), p(1)])], &all), "selection");
-        assert!(!covers_all(&[job(&[p(0)]), job(&[p(2)])], &all), "gap");
-        assert!(
-            !covers_all(&[job(&[p(1), p(2)]), job(&[p(0)])], &all),
-            "order"
-        );
-        assert!(!covers_all(&[job(&all), job(&[p(0)])], &all), "extra");
     }
 }
