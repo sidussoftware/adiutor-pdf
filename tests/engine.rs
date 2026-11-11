@@ -6,7 +6,15 @@ use adiutor_pdf::pdfium_lib;
 use adiutor_pdf::workspace::PageRef;
 use pdfium_render::prelude::{PdfPagePaperSize, PdfPoints};
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, Instant};
+
+/// Serializes the tests: PDFium's last-error code is process-global, so a load failing on one
+/// engine thread can report another thread's error (e.g. PasswordError for a corrupt file).
+fn serial() -> MutexGuard<'static, ()> {
+    static LOCK: Mutex<()> = Mutex::new(());
+    LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
 
 /// Starts an engine, or returns None (skip) when PDFium is missing outside CI.
 fn engine() -> Option<Engine> {
@@ -93,6 +101,7 @@ fn page(doc: usize, index: u32) -> PageRef {
 
 #[test]
 fn open_reports_page_sizes() {
+    let _serial = serial();
     let Some(engine) = engine() else { return };
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("a.pdf");
@@ -114,6 +123,7 @@ fn open_reports_page_sizes() {
 
 #[test]
 fn merge_preserves_order() {
+    let _serial = serial();
     let Some(engine) = engine() else { return };
     let dir = tempfile::tempdir().unwrap();
     let (a, b, out) = (
@@ -156,6 +166,7 @@ fn merge_preserves_order() {
 
 #[test]
 fn extract_subset() {
+    let _serial = serial();
     let Some(engine) = engine() else { return };
     let dir = tempfile::tempdir().unwrap();
     let (a, out) = (dir.path().join("a.pdf"), dir.path().join("out.pdf"));
@@ -171,6 +182,7 @@ fn extract_subset() {
 
 #[test]
 fn corrupted_file_fails() {
+    let _serial = serial();
     let Some(engine) = engine() else { return };
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("bad.pdf");
@@ -184,6 +196,7 @@ fn corrupted_file_fails() {
 
 #[test]
 fn encrypted_pdf_wrong_then_right_password() {
+    let _serial = serial();
     let Some(engine) = engine() else { return };
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/encrypted.pdf");
     let event = open(&engine, &path, None);
@@ -209,6 +222,7 @@ fn encrypted_pdf_wrong_then_right_password() {
 
 #[test]
 fn failed_save_leaves_no_files() {
+    let _serial = serial();
     let Some(engine) = engine() else { return };
     let dir = tempfile::tempdir().unwrap();
     let a = dir.path().join("a.pdf");
@@ -232,6 +246,7 @@ fn failed_save_leaves_no_files() {
 
 #[test]
 fn visible_set_replaces_pending_renders() {
+    let _serial = serial();
     let Some(engine) = engine() else { return };
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("many.pdf");
@@ -263,6 +278,7 @@ fn visible_set_replaces_pending_renders() {
 
 #[test]
 fn thumbnail_has_requested_width() {
+    let _serial = serial();
     let Some(engine) = engine() else { return };
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("a.pdf");
