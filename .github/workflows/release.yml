@@ -9,6 +9,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
   check:
     runs-on: ubuntu-22.04
@@ -21,10 +25,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          set -euo pipefail
           version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')
+          # `gh release view` finds releases by tag, and a draft has none yet; list includes drafts.
+          releases=$(gh release list --limit 200 --json tagName,name)
+          found=$(jq --arg t "v$version" '[.[] | select(.tagName == $t or .name == "adiutor-pdf " + $t)] | length' <<< "$releases")
+          tags=$(git ls-remote --tags origin "v$version")
           create=false
-          if ! gh release view "v$version" >/dev/null 2>&1 \
-            && [ -z "$(git ls-remote --tags origin "v$version")" ]; then
+          if [ "$found" = 0 ] && [ -z "$tags" ]; then
             create=true
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
@@ -85,6 +93,7 @@ jobs:
           [ "$(grep -c 'x86_64 arm64' lipo.txt)" = 2 ]
           cp packaging/macos/Info.plist "$app/Info.plist"
           plutil -replace CFBundleShortVersionString -string "$VERSION" "$app/Info.plist"
+          plutil -replace CFBundleVersion -string "$VERSION" "$app/Info.plist"
           cp pdfium-arm64/LICENSE pdfium-arm64/licenses/* licenses/pdfium/
           # Ad-hoc signature so Apple Silicon allows launching the app.
           codesign --force --deep -s - adiutor-pdf.app
