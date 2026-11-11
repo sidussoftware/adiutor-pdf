@@ -68,6 +68,9 @@ pub enum Event {
 #[derive(Debug)]
 pub struct EngineDead;
 
+/// Upper bound for thumbnail bitmap height, in pixels.
+const MAX_THUMB_HEIGHT: u32 = 4096;
+
 pub struct Engine {
     commands: Sender<Command>,
     events: Receiver<Event>,
@@ -204,7 +207,7 @@ impl<W: Fn()> Worker<'_, W> {
                 }
                 Err(e) => Event::OpenFailed {
                     path,
-                    reason: format!("{e:?}"),
+                    reason: reason(&e),
                 },
             },
             Err(PdfiumError::PdfiumLibraryInternalError(PdfiumInternalError::PasswordError)) => {
@@ -215,7 +218,7 @@ impl<W: Fn()> Worker<'_, W> {
             }
             Err(e) => Event::OpenFailed {
                 path,
-                reason: format!("{e:?}"),
+                reason: reason(&e),
             },
         };
         self.emit(event);
@@ -225,10 +228,16 @@ impl<W: Fn()> Worker<'_, W> {
         let doc = self.docs.get(page.doc).ok_or("unknown document")?;
         let index = PdfPageIndex::try_from(page.index).map_err(|e| e.to_string())?;
         let target = Pixels::try_from(width_px).map_err(|e| e.to_string())?;
-        let pdf_page = doc.pages().get(index).map_err(|e| format!("{e:?}"))?;
+        // Cap the height so very tall pages stay within texture limits.
+        let max_height = Pixels::try_from(width_px.saturating_mul(4).min(MAX_THUMB_HEIGHT))
+            .map_err(|e| e.to_string())?;
+        let pdf_page = doc.pages().get(index).map_err(|e| reason(&e))?;
+        let config = PdfRenderConfig::new()
+            .set_target_width(target)
+            .set_maximum_height(max_height);
         let bitmap = pdf_page
-            .render_with_config(&PdfRenderConfig::new().set_target_width(target))
-            .map_err(|e| format!("{e:?}"))?;
+            .render_with_config(&config)
+            .map_err(|e| reason(&e))?;
         let width = u32::try_from(bitmap.width()).map_err(|e| e.to_string())?;
         let height = u32::try_from(bitmap.height()).map_err(|e| e.to_string())?;
         let rgba = bitmap.as_rgba_bytes();
@@ -272,7 +281,7 @@ impl<W: Fn()> Worker<'_, W> {
 
     /// Copies `pages` into a new document written to `tmp`, emitting progress per run.
     fn write(&self, job: u64, pages: &[PageRef], tmp: &Path) -> Result<(), String> {
-        let mut out = self.pdfium.create_new_pdf().map_err(|e| format!("{e:?}"))?;
+        let mut out = self.pdfium.create_new_pdf().map_err(|e| reason(&e))?;
         let total = pages.len();
         let mut done = 0;
         for (doc, range) in runs(pages) {
@@ -282,11 +291,26 @@ impl<W: Fn()> Worker<'_, W> {
             let at = out.pages().len();
             out.pages_mut()
                 .copy_page_range_from_document(src, first..=last, at)
-                .map_err(|e| format!("{e:?}"))?;
+                .map_err(|e| reason(&e))?;
             done += (last - first + 1) as usize;
             self.emit(Event::SaveProgress { job, done, total });
         }
-        out.save_to_file(tmp).map_err(|e| format!("{e:?}"))
+        out.save_to_file(tmp).map_err(|e| reason(&e))
+    }
+}
+
+/// Short English reason shown inside a translated message.
+fn reason(e: &PdfiumError) -> String {
+    match e {
+        PdfiumError::PdfiumLibraryInternalError(PdfiumInternalError::FormatError) => {
+            "not a valid PDF or damaged".into()
+        }
+        PdfiumError::PdfiumLibraryInternalError(PdfiumInternalError::FileError) => {
+            "cannot read the file".into()
+        }
+        PdfiumError::IoError(e) => e.to_string(),
+        // PdfiumError's Display is multi-line Debug; plain Debug stays on one line.
+        e => format!("{e:?}"),
     }
 }
 
