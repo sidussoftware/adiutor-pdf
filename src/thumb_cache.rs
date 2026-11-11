@@ -1,19 +1,26 @@
-//! Bounded LRU map keyed by page; the UI stores egui texture handles in it.
+//! LRU map keyed by page and bounded by the total size of its values; the UI stores egui texture
+//! handles in it.
 
 use crate::workspace::PageRef;
 use std::collections::HashMap;
 
 pub struct ThumbCache<V> {
-    cap: usize,
+    max_bytes: usize,
+    bytes: usize,
     tick: u64,
-    map: HashMap<PageRef, (V, u64)>,
+    /// `tick` at the last `begin_frame`; entries used after it are on screen and never evicted.
+    frame_start: u64,
+    /// value, last use, size in bytes
+    map: HashMap<PageRef, (V, u64, usize)>,
 }
 
 impl<V> ThumbCache<V> {
-    pub fn new(cap: usize) -> Self {
+    pub fn new(max_bytes: usize) -> Self {
         Self {
-            cap,
+            max_bytes,
+            bytes: 0,
             tick: 0,
+            frame_start: 0,
             map: HashMap::new(),
         }
     }
@@ -22,28 +29,45 @@ impl<V> ThumbCache<V> {
     pub fn get(&mut self, key: &PageRef) -> Option<&V> {
         self.tick += 1;
         let tick = self.tick;
-        self.map.get_mut(key).map(|(v, used)| {
+        self.map.get_mut(key).map(|(v, used, _)| {
             *used = tick;
             &*v
         })
     }
 
-    /// Evicts the least recently used entry when over capacity.
-    pub fn insert(&mut self, key: PageRef, value: V) {
+    /// Evicts least recently used entries until the total is within `max_bytes`, but never one
+    /// used since `begin_frame` (so the new entry is always kept): the cache can exceed the
+    /// budget by at most one screen of thumbnails instead of evicting visible ones forever.
+    pub fn insert(&mut self, key: PageRef, value: V, bytes: usize) {
         self.tick += 1;
-        self.map.insert(key, (value, self.tick));
-        // shortcut: linear scan for the oldest entry, fine at cap 300; use a linked list if the cap grows
-        while self.map.len() > self.cap {
+        if let Some((_, _, old)) = self.map.insert(key, (value, self.tick, bytes)) {
+            self.bytes -= old;
+        }
+        self.bytes += bytes;
+        // shortcut: linear scan for the oldest entry, fine for the few hundred thumbnails the UI's
+        // budget holds; use a linked list if the budget or entry count grows a lot
+        while self.bytes > self.max_bytes {
             let oldest = self
                 .map
                 .iter()
-                .min_by_key(|(_, (_, t))| *t)
+                .min_by_key(|(_, (_, t, _))| *t)
+                .filter(|(_, (_, t, _))| *t <= self.frame_start)
                 .map(|(k, _)| *k);
-            match oldest {
-                Some(k) => self.map.remove(&k),
-                None => break,
+            let Some((_, _, b)) = oldest.and_then(|k| self.map.remove(&k)) else {
+                break;
             };
+            self.bytes -= b;
         }
+    }
+
+    /// Call before each draw that `get`s the visible entries.
+    pub fn begin_frame(&mut self) {
+        self.frame_start = self.tick;
+    }
+
+    pub fn clear(&mut self) {
+        self.map.clear();
+        self.bytes = 0;
     }
 }
 
@@ -58,10 +82,11 @@ mod tests {
     #[test]
     fn evicts_least_recently_used() {
         let mut c = ThumbCache::new(2);
-        c.insert(p(0), 'a');
-        c.insert(p(1), 'b');
+        c.insert(p(0), 'a', 1);
+        c.insert(p(1), 'b', 1);
+        c.begin_frame();
         assert_eq!(c.get(&p(0)), Some(&'a'));
-        c.insert(p(2), 'c');
+        c.insert(p(2), 'c', 1);
         assert_eq!(c.get(&p(1)), None);
         assert_eq!(c.get(&p(0)), Some(&'a'));
         assert_eq!(c.get(&p(2)), Some(&'c'));
@@ -70,11 +95,52 @@ mod tests {
     #[test]
     fn insert_existing_updates_without_growing() {
         let mut c = ThumbCache::new(2);
-        c.insert(p(0), 'a');
-        c.insert(p(0), 'b');
-        // If the update had added an entry, this insert would evict one.
-        c.insert(p(1), 'c');
+        c.insert(p(0), 'a', 1);
+        c.insert(p(0), 'b', 1);
+        c.begin_frame();
+        // If the update had counted its bytes twice, this insert would evict one.
+        c.insert(p(1), 'c', 1);
         assert_eq!(c.get(&p(0)), Some(&'b'));
         assert_eq!(c.get(&p(1)), Some(&'c'));
+    }
+
+    #[test]
+    fn never_evicts_entries_used_this_frame() {
+        let mut c = ThumbCache::new(2);
+        c.begin_frame();
+        c.insert(p(0), 'a', 1);
+        c.insert(p(1), 'b', 1);
+        c.insert(p(2), 'c', 1); // over budget, but all three are on screen
+        assert_eq!(c.get(&p(0)), Some(&'a'));
+        assert_eq!(c.get(&p(1)), Some(&'b'));
+        assert_eq!(c.get(&p(2)), Some(&'c'));
+        c.begin_frame();
+        assert_eq!(c.get(&p(2)), Some(&'c'));
+        c.insert(p(3), 'd', 1); // p(0) and p(1) were not used this frame
+        assert_eq!(c.get(&p(0)), None);
+        assert_eq!(c.get(&p(1)), None);
+        assert_eq!(c.get(&p(2)), Some(&'c'));
+        assert_eq!(c.get(&p(3)), Some(&'d'));
+    }
+
+    #[test]
+    fn evicts_by_bytes_and_keeps_an_oversized_new_entry() {
+        let mut c = ThumbCache::new(10);
+        c.insert(p(0), 'a', 4);
+        c.insert(p(1), 'b', 4);
+        c.begin_frame();
+        c.insert(p(2), 'c', 4); // 12 > 10: the oldest goes
+        assert_eq!(c.get(&p(0)), None);
+        assert_eq!(c.get(&p(1)), Some(&'b'));
+        assert_eq!(c.get(&p(2)), Some(&'c'));
+        c.begin_frame();
+        c.insert(p(3), 'd', 50); // larger than the budget on its own
+        assert_eq!(c.get(&p(1)), None);
+        assert_eq!(c.get(&p(2)), None);
+        assert_eq!(c.get(&p(3)), Some(&'d'));
+        c.begin_frame();
+        c.insert(p(4), 'e', 1); // the oversized entry is evicted in turn
+        assert_eq!(c.get(&p(3)), None);
+        assert_eq!(c.get(&p(4)), Some(&'e'));
     }
 }

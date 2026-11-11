@@ -14,13 +14,20 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Release builds start only after the full CI matrix passes. ci.yml also runs on its own push
+  # trigger for main, so CI runs twice, but only for a merge that builds a release.
+  ci:
+    needs: check
+    if: needs.check.outputs.create == 'true'
+    uses: ./.github/workflows/ci.yml
+
   check:
     runs-on: ubuntu-22.04
     outputs:
       create: ${{ steps.v.outputs.create }}
       version: ${{ steps.v.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - id: v
         env:
           GH_TOKEN: ${{ github.token }}
@@ -39,15 +46,17 @@ jobs:
           echo "create=$create" >> "$GITHUB_OUTPUT"
 
   windows:
-    needs: check
+    needs: [check, ci]
     if: needs.check.outputs.create == 'true'
     runs-on: windows-latest
     env:
       VERSION: ${{ needs.check.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: "1.95"
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: Build
         shell: bash
         run: |
@@ -58,7 +67,7 @@ jobs:
           cp target/release/adiutor-pdf.exe pdfium/bin/pdfium.dll LICENSE-MIT LICENSE-APACHE "$pkg/"
           cp pdfium/LICENSE pdfium/licenses/* "$pkg/licenses/pdfium/"
       # Puts dumpbin on PATH.
-      - uses: ilammy/msvc-dev-cmd@v1
+      - uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
       - name: Check the exe needs no VC++ runtime
         shell: pwsh
         run: |
@@ -70,23 +79,24 @@ jobs:
       - name: Zip
         shell: pwsh
         run: Compress-Archive -Path "adiutor-pdf-v$env:VERSION-windows-x64\*" -DestinationPath "adiutor-pdf-v$env:VERSION-windows-x64.zip"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: windows
           path: adiutor-pdf-v${{ needs.check.outputs.version }}-windows-x64.zip
 
   macos:
-    needs: check
+    needs: [check, ci]
     if: needs.check.outputs.create == 'true'
     runs-on: macos-latest
     env:
       VERSION: ${{ needs.check.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
+          toolchain: "1.95"
           targets: x86_64-apple-darwin,aarch64-apple-darwin
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: Build universal app
         run: |
           cargo build --release --target x86_64-apple-darwin
@@ -111,13 +121,13 @@ jobs:
           mkdir "$pkg"
           cp -R adiutor-pdf.app licenses LICENSE-MIT LICENSE-APACHE "$pkg/"
           ditto -c -k --keepParent "$pkg" "$pkg.zip"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: macos
           path: adiutor-pdf-v${{ needs.check.outputs.version }}-macos-universal.zip
 
   linux:
-    needs: check
+    needs: [check, ci]
     if: needs.check.outputs.create == 'true'
     runs-on: ubuntu-22.04
     env:
@@ -126,9 +136,11 @@ jobs:
       APPIMAGETOOL_URL: https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage
       APPIMAGETOOL_SHA256: ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: "1.95"
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: Install Linux dev packages
         run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev
       - name: Build AppImage
@@ -147,16 +159,16 @@ jobs:
           cp pdfium/LICENSE pdfium/licenses/* $d/licenses/pdfium/
           ln -s usr/bin/adiutor-pdf $d/AppRun
           ARCH=x86_64 ./appimagetool --appimage-extract-and-run $d "adiutor-pdf-v$VERSION-linux-x86_64.AppImage"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: linux
           path: adiutor-pdf-v${{ needs.check.outputs.version }}-linux-x86_64.AppImage
 
   release:
-    needs: [check, windows, macos, linux]
+    needs: [check, ci, windows, macos, linux]
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           path: dist
           merge-multiple: true

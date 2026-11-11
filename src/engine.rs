@@ -8,6 +8,8 @@ use pdfium_render::prelude::{
 use std::collections::VecDeque;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::thread::{self, JoinHandle};
 
@@ -72,9 +74,12 @@ pub struct EngineDead;
 const MAX_THUMB_HEIGHT: u32 = 4096;
 
 pub struct Engine {
-    commands: Sender<Command>,
+    /// Always Some until `drop`, which takes it so the idle worker's `recv` ends.
+    commands: Option<Sender<Command>>,
     events: Receiver<Event>,
-    _worker: JoinHandle<()>,
+    worker: Option<JoinHandle<()>>,
+    /// Set by `drop`: the worker stops and a running save removes its temp file.
+    shutdown: Arc<AtomicBool>,
 }
 
 impl Engine {
@@ -83,6 +88,8 @@ impl Engine {
         let (cmd_tx, cmd_rx) = mpsc::channel();
         let (event_tx, event_rx) = mpsc::channel();
         let (ready_tx, ready_rx) = mpsc::sync_channel(1);
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let worker_shutdown = Arc::clone(&shutdown);
         let worker = thread::Builder::new()
             .name("pdf-engine".into())
             .spawn(move || {
@@ -99,6 +106,7 @@ impl Engine {
                     docs: Vec::new(),
                     events: event_tx,
                     wake,
+                    shutdown: worker_shutdown,
                 }
                 .run(cmd_rx);
             })
@@ -107,14 +115,16 @@ impl Engine {
             .recv()
             .map_err(|_| "PDF engine thread ended during startup".to_string())??;
         Ok(Engine {
-            commands: cmd_tx,
+            commands: Some(cmd_tx),
             events: event_rx,
-            _worker: worker,
+            worker: Some(worker),
+            shutdown,
         })
     }
 
     pub fn send(&self, cmd: Command) -> Result<(), EngineDead> {
-        self.commands.send(cmd).map_err(|_| EngineDead)
+        let commands = self.commands.as_ref().ok_or(EngineDead)?;
+        commands.send(cmd).map_err(|_| EngineDead)
     }
 
     pub fn try_recv(&self) -> Result<Option<Event>, EngineDead> {
@@ -122,6 +132,18 @@ impl Engine {
             Ok(event) => Ok(Some(event)),
             Err(TryRecvError::Empty) => Ok(None),
             Err(TryRecvError::Disconnected) => Err(EngineDead),
+        }
+    }
+}
+
+impl Drop for Engine {
+    /// Aborts a running save (its temp file is removed, the destination is untouched) and waits
+    /// for the worker to end.
+    fn drop(&mut self) {
+        self.shutdown.store(true, Ordering::Relaxed);
+        self.commands = None;
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
         }
     }
 }
@@ -146,13 +168,14 @@ struct Worker<'a, W> {
     docs: Vec<PdfDocument<'a>>,
     events: Sender<Event>,
     wake: W,
+    shutdown: Arc<AtomicBool>,
 }
 
 impl<W: Fn()> Worker<'_, W> {
     fn run(mut self, commands: Receiver<Command>) {
         let mut pending: VecDeque<PageRef> = VecDeque::new();
         let mut width_px = 0;
-        loop {
+        while !self.shutdown.load(Ordering::Relaxed) {
             // Block only when idle; otherwise drain commands before each render.
             let cmd = if pending.is_empty() {
                 match commands.recv() {
@@ -269,6 +292,7 @@ impl<W: Fn()> Worker<'_, W> {
         let tmp = dest.with_file_name(tmp_name);
         let result = self
             .write(job, pages, &tmp)
+            .and_then(|()| self.check_shutdown())
             .and_then(|()| std::fs::rename(&tmp, &dest).map_err(|e| e.to_string()));
         self.emit(match result {
             Ok(()) => Event::Saved { job, dest },
@@ -285,6 +309,7 @@ impl<W: Fn()> Worker<'_, W> {
         let total = pages.len();
         let mut done = 0;
         for (doc, range) in runs(pages) {
+            self.check_shutdown()?;
             let src = self.docs.get(doc).ok_or("unknown document")?;
             let first = PdfPageIndex::try_from(*range.start()).map_err(|e| e.to_string())?;
             let last = PdfPageIndex::try_from(*range.end()).map_err(|e| e.to_string())?;
@@ -295,7 +320,16 @@ impl<W: Fn()> Worker<'_, W> {
             done += (last - first + 1) as usize;
             self.emit(Event::SaveProgress { job, done, total });
         }
+        self.check_shutdown()?;
         out.save_to_file(tmp).map_err(|e| reason(&e))
+    }
+
+    fn check_shutdown(&self) -> Result<(), String> {
+        if self.shutdown.load(Ordering::Relaxed) {
+            Err("the app is closing".into())
+        } else {
+            Ok(())
+        }
     }
 }
 

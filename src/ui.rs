@@ -1,5 +1,6 @@
 //! Main window: toolbar, thumbnail grid and bottom bar.
 
+use crate::batch::Batch;
 use crate::engine::{Command, Engine, Event};
 use crate::i18n::{Lang, Tr};
 use crate::ranges::{self, RangeError};
@@ -10,13 +11,22 @@ use std::collections::{HashSet, VecDeque};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
-const THUMB_CACHE_CAP: usize = 300;
+/// Bytes of thumbnail textures kept (RGBA, 4 bytes per pixel).
+const THUMB_CACHE_BYTES: usize = 48 << 20;
 /// Thumbnail width in points; the engine renders it at `THUMB_WIDTH * pixels_per_point`.
 const THUMB_WIDTH: f32 = 150.0;
 const LABEL_HEIGHT: f32 = 20.0;
 const GAP: f32 = 12.0;
 
 type GridAction = Box<dyn FnOnce(&mut Workspace)>;
+
+/// An i18n key and its placeholder values, translated when drawn so a language switch applies.
+type Message = (&'static str, Vec<(&'static str, String)>);
+
+fn message_text(tr: &Tr, (key, args): &Message) -> String {
+    let args: Vec<(&str, &str)> = args.iter().map(|(n, v)| (*n, v.as_str())).collect();
+    tr.tf(key, &args)
+}
 
 pub struct AdiutorApp {
     /// Err = why the engine could not start; shown instead of the grid.
@@ -26,16 +36,16 @@ pub struct AdiutorApp {
     cache: ThumbCache<TextureHandle>,
     /// Last set sent with `Command::Visible`, to avoid resending an unchanged set.
     last_visible: Vec<PageRef>,
+    /// Scale the cached thumbnails were rendered for.
+    pixels_per_point: f32,
     /// Dismissible messages at the bottom (failures, results).
-    messages: Vec<String>,
+    messages: Vec<Message>,
     /// Contents of the Pages field and the parse error shown under it.
     pages_text: String,
     pages_error: Option<RangeError>,
     next_job: u64,
     /// The running save or split, if any.
     batch: Option<Batch>,
-    /// Latest `SaveProgress` of the running batch.
-    progress: Option<(usize, usize)>,
     /// Encrypted files waiting for a password (path, previous attempt was wrong).
     passwords: VecDeque<(PathBuf, bool)>,
     password_text: String,
@@ -46,24 +56,6 @@ pub struct AdiutorApp {
     closing: bool,
     /// The engine thread ended; its error was already shown.
     engine_dead: bool,
-}
-
-/// Jobs of one Save or Split that have not finished yet.
-struct Batch {
-    pending: HashSet<u64>,
-    ok: usize,
-    failed: bool,
-    /// Some for a split: the destination folder.
-    split_folder: Option<PathBuf>,
-    /// The page list when the batch started; `mark_saved` only if it is unchanged at the end.
-    pages: Vec<PageRef>,
-    /// The jobs write every page of `pages`, in order (Save all, or a full split).
-    covers_all: bool,
-}
-
-/// True if the jobs' pages, concatenated in job order, are exactly `all`.
-fn covers_all(jobs: &[(Vec<PageRef>, PathBuf)], all: &[PageRef]) -> bool {
-    jobs.iter().flat_map(|(pages, _)| pages).eq(all)
 }
 
 fn range_error_text(tr: &Tr, e: &RangeError) -> String {
@@ -82,7 +74,8 @@ fn range_error_text(tr: &Tr, e: &RangeError) -> String {
 }
 
 /// Modal with a title, a text, a confirm button and Cancel (keys are i18n keys).
-/// Returns Some(true) on confirm, Some(false) on Cancel, None while unanswered.
+/// Returns Some(true) on confirm, Some(false) on Cancel, Esc or a click outside, None while
+/// unanswered.
 fn confirm_modal(
     ctx: &egui::Context,
     tr: &Tr,
@@ -92,7 +85,7 @@ fn confirm_modal(
     confirm_key: &str,
 ) -> Option<bool> {
     let mut answer = None;
-    egui::Modal::new(egui::Id::NULL.with(id)).show(ctx, |ui| {
+    let modal = egui::Modal::new(egui::Id::NULL.with(id)).show(ctx, |ui| {
         ui.heading(tr.t(title_key));
         ui.label(body);
         ui.horizontal(|ui| {
@@ -104,7 +97,7 @@ fn confirm_modal(
             }
         });
     });
-    answer
+    answer.or_else(|| modal.should_close().then_some(false))
 }
 
 fn file_name(path: &Path) -> String {
@@ -120,14 +113,14 @@ impl AdiutorApp {
             engine,
             workspace: Workspace::new(),
             tr,
-            cache: ThumbCache::new(THUMB_CACHE_CAP),
+            cache: ThumbCache::new(THUMB_CACHE_BYTES),
             last_visible: Vec::new(),
+            pixels_per_point: ctx.pixels_per_point(),
             messages: Vec::new(),
             pages_text: String::new(),
             pages_error: None,
             next_job: 0,
             batch: None,
-            progress: None,
             passwords: VecDeque::new(),
             password_text: String::new(),
             close_prompt: false,
@@ -151,14 +144,17 @@ impl AdiutorApp {
 
     /// Shows the internal error once, however often the dead engine is used.
     fn engine_died(&mut self) {
+        // No more events will come: unblock Save and Split.
+        self.batch = None;
         if !std::mem::replace(&mut self.engine_dead, true) {
-            self.error(self.tr.t("error.internal").to_string());
+            self.error("error.internal", vec![]);
         }
     }
 
-    fn error(&mut self, text: String) {
-        eprintln!("{text}");
-        self.messages.push(text);
+    fn error(&mut self, key: &'static str, args: Vec<(&'static str, String)>) {
+        let message = (key, args);
+        eprintln!("{}", message_text(&self.tr, &message));
+        self.messages.push(message);
     }
 
     fn open(&mut self, path: PathBuf) {
@@ -203,34 +199,33 @@ impl AdiutorApp {
                     );
                     let name = format!("thumb-{}-{}", page.doc, page.index);
                     let tex = ctx.load_texture(name, image, TextureOptions::LINEAR);
-                    self.cache.insert(page, tex);
+                    let bytes = width as usize * height as usize * 4;
+                    self.cache.insert(page, tex, bytes);
                 }
                 Event::OpenFailed { path, reason } => {
-                    let text = self.tr.tf(
+                    self.error(
                         "open.failed",
-                        &[("file", &file_name(&path)), ("reason", &reason)],
+                        vec![("file", file_name(&path)), ("reason", reason)],
                     );
-                    self.error(text);
                 }
                 Event::PasswordRequired { path, wrong } => self.passwords.push_back((path, wrong)),
-                Event::SaveProgress { done, total, .. } => self.progress = Some((done, total)),
+                Event::SaveProgress { job, done, .. } => {
+                    if let Some(b) = &mut self.batch {
+                        b.progress(job, done);
+                    }
+                }
                 Event::Saved { job, dest } => {
-                    if self
-                        .batch
-                        .as_ref()
-                        .is_some_and(|b| b.split_folder.is_none())
-                    {
-                        let text = self.tr.tf("save.done", &[("file", &file_name(&dest))]);
-                        self.messages.push(text);
+                    if self.batch.as_ref().is_some_and(|b| !b.is_split()) {
+                        self.messages
+                            .push(("save.done", vec![("file", file_name(&dest))]));
                     }
                     self.finish_job(job, true);
                 }
                 Event::SaveFailed { job, dest, reason } => {
-                    let text = self.tr.tf(
+                    self.error(
                         "save.failed",
-                        &[("file", &file_name(&dest)), ("reason", &reason)],
+                        vec![("file", file_name(&dest)), ("reason", reason)],
                     );
-                    self.error(text);
                     self.finish_job(job, false);
                 }
             }
@@ -238,30 +233,26 @@ impl AdiutorApp {
     }
 
     fn finish_job(&mut self, job: u64, ok: bool) {
-        let Some(b) = &mut self.batch else { return };
-        if !b.pending.remove(&job) {
+        let current = self.workspace.all_pages();
+        let Some(outcome) = self
+            .batch
+            .as_mut()
+            .and_then(|b| b.finish(job, ok, &current))
+        else {
             return;
+        };
+        self.batch = None;
+        if let Some((count, folder)) = outcome.split_done {
+            let key = if count == 1 {
+                "split.done_one"
+            } else {
+                "split.done"
+            };
+            let folder = folder.to_string_lossy().into_owned();
+            self.messages
+                .push((key, vec![("count", count.to_string()), ("folder", folder)]));
         }
-        b.ok += usize::from(ok);
-        b.failed |= !ok;
-        if !b.pending.is_empty() {
-            return;
-        }
-        let b = self.batch.take().expect("checked above");
-        self.progress = None;
-        if let Some(folder) = &b.split_folder
-            && b.ok > 0
-        {
-            let text = self.tr.tf(
-                "split.done",
-                &[
-                    ("count", &b.ok.to_string()),
-                    ("folder", &folder.to_string_lossy()),
-                ],
-            );
-            self.messages.push(text);
-        }
-        if !b.failed && b.covers_all && self.workspace.all_pages() == b.pages {
+        if outcome.mark_saved {
             self.workspace.mark_saved();
         }
     }
@@ -269,28 +260,15 @@ impl AdiutorApp {
     /// Sends one `Save` per (pages, dest) and starts tracking them as a batch.
     fn start_batch(&mut self, jobs: Vec<(Vec<PageRef>, PathBuf)>, split_folder: Option<PathBuf>) {
         if jobs.iter().any(|(_, d)| self.workspace.is_source_path(d)) {
-            let text = self.tr.t("save.blocked_original").to_string();
-            self.messages.push(text);
+            self.messages.push(("save.blocked_original", vec![]));
             return;
         }
-        let pages = self.workspace.all_pages();
-        let covers_all = covers_all(&jobs, &pages);
-        let mut pending = HashSet::new();
-        for (pages, dest) in jobs {
-            let job = self.next_job;
-            self.next_job += 1;
-            pending.insert(job);
+        let all = self.workspace.all_pages();
+        let (batch, send) = Batch::new(jobs, all, split_folder, &mut self.next_job);
+        self.batch = Some(batch);
+        for (job, pages, dest) in send {
             self.send(Command::Save { job, pages, dest });
         }
-        self.progress = None;
-        self.batch = Some(Batch {
-            pending,
-            ok: 0,
-            failed: false,
-            split_folder,
-            pages,
-            covers_all,
-        });
     }
 
     fn save(&mut self, selection_only: bool) {
@@ -352,14 +330,11 @@ impl AdiutorApp {
                 .filter_map(|e| e.file_name().into_string().ok())
                 .collect(),
             Err(e) => {
-                let text = self.tr.tf(
+                let file = folder.to_string_lossy().into_owned();
+                self.error(
                     "save.failed",
-                    &[
-                        ("file", &folder.to_string_lossy()),
-                        ("reason", &e.to_string()),
-                    ],
+                    vec![("file", file), ("reason", e.to_string())],
                 );
-                self.error(text);
                 return;
             }
         };
@@ -456,9 +431,19 @@ impl AdiutorApp {
             ui.centered_and_justified(|ui| ui.label(self.tr.t("grid.empty_hint")));
             return;
         }
+        let ppp = ui.ctx().pixels_per_point();
+        if ppp != self.pixels_per_point {
+            // Re-render at the new scale so thumbnails stay sharp.
+            self.pixels_per_point = ppp;
+            self.cache.clear();
+            self.last_visible.clear();
+        }
+        // Thumbnails drawn from here on are on screen; inserts until the next draw keep them.
+        self.cache.begin_frame();
         let mut visible: Vec<PageRef> = Vec::new();
         let mut action: Option<GridAction> = None;
-        let mut marker: Option<(f32, f32, f32)> = None; // x, top, bottom
+        // Cell rects by grid position, collected while dragging to find the drop target.
+        let mut cells: Vec<egui::Rect> = Vec::new();
         let dragging = egui::DragAndDrop::has_payload_of_type::<usize>(ui.ctx());
         let mods = ui.input(|i| i.modifiers);
         egui::ScrollArea::vertical()
@@ -491,20 +476,8 @@ impl AdiutorApp {
                                 }
                             }));
                         }
-                        if dragging && resp.contains_pointer() {
-                            let after = ui
-                                .input(|i| i.pointer.interact_pos())
-                                .is_some_and(|p| p.x >= rect.center().x);
-                            let target = pos + usize::from(after);
-                            let x = if after { rect.right() } else { rect.left() };
-                            marker = Some((
-                                x + if after { GAP / 2.0 } else { -GAP / 2.0 },
-                                rect.top(),
-                                rect.bottom(),
-                            ));
-                            if resp.dnd_release_payload::<usize>().is_some() {
-                                action = Some(Box::new(move |w| w.move_selected_to(target)));
-                            }
+                        if dragging {
+                            cells.push(rect);
                         }
                         if !ui.is_rect_visible(rect) {
                             continue;
@@ -513,9 +486,13 @@ impl AdiutorApp {
                             egui::Rect::from_min_size(rect.min, vec2(THUMB_WIDTH, thumb_h));
                         match self.cache.get(&slot.page) {
                             Some(tex) => {
+                                // Letterbox: the rendered bitmap can differ from the clamped cell.
+                                let size = tex.size_vec2();
+                                let scale =
+                                    (img_rect.width() / size.x).min(img_rect.height() / size.y);
                                 ui.painter().image(
                                     tex.id(),
-                                    img_rect,
+                                    egui::Rect::from_center_size(img_rect.center(), size * scale),
                                     egui::Rect::from_min_max(
                                         egui::pos2(0.0, 0.0),
                                         egui::pos2(1.0, 1.0),
@@ -558,18 +535,45 @@ impl AdiutorApp {
                         }
                     }
                 });
-                if let Some((x, top, bottom)) = marker {
+                // Over a cell or a gap of the grid, the drop goes next to the nearest cell.
+                let clip = ui.clip_rect();
+                let pointer = ui.input(|i| i.pointer.interact_pos());
+                let nearest = pointer
+                    .filter(|_| ui.rect_contains_pointer(clip))
+                    .and_then(|p| {
+                        let dist = |r: &egui::Rect| r.distance_sq_to_pos(p);
+                        let cell = cells
+                            .iter()
+                            .enumerate()
+                            .min_by(|(_, a), (_, b)| dist(a).total_cmp(&dist(b)))?;
+                        Some((p, cell))
+                    });
+                if let Some((p, (pos, rect))) = nearest {
+                    let after = p.x >= rect.center().x;
+                    let target = pos + usize::from(after);
+                    let x = if after {
+                        rect.right() + GAP / 2.0
+                    } else {
+                        rect.left() - GAP / 2.0
+                    };
+                    // Keep the 3 pt line inside the clip, e.g. before a row's first cell.
+                    let x = x.clamp(clip.left() + 1.5, clip.right() - 1.5);
                     ui.painter().line_segment(
-                        [egui::pos2(x, top), egui::pos2(x, bottom)],
+                        [egui::pos2(x, rect.top()), egui::pos2(x, rect.bottom())],
                         egui::Stroke::new(3.0, ui.visuals().selection.bg_fill),
                     );
+                    if ui.input(|i| i.pointer.any_released())
+                        && egui::DragAndDrop::take_payload::<usize>(ui.ctx()).is_some()
+                    {
+                        action = Some(Box::new(move |w| w.move_selected_to(target)));
+                    }
                 }
             });
         if let Some(f) = action {
             f(&mut self.workspace);
         }
         if visible != self.last_visible {
-            let width_px = (THUMB_WIDTH * ui.ctx().pixels_per_point()).round() as u32;
+            let width_px = (THUMB_WIDTH * ppp).round() as u32;
             self.last_visible = visible.clone();
             self.send(Command::Visible {
                 pages: visible,
@@ -579,8 +583,8 @@ impl AdiutorApp {
     }
 
     fn bottom_bar(&mut self, ui: &mut egui::Ui) {
-        if self.batch.is_some() {
-            let (done, total) = self.progress.unwrap_or((0, 1));
+        if let Some(b) = &self.batch {
+            let (done, total) = b.total_progress();
             let text = self.tr.tf(
                 "save.progress",
                 &[("done", &done.to_string()), ("total", &total.to_string())],
@@ -594,7 +598,7 @@ impl AdiutorApp {
                 if ui.button(self.tr.t("common.close")).clicked() {
                     dismiss = Some(i);
                 }
-                ui.label(message);
+                ui.label(message_text(&self.tr, message));
             });
         }
         if let Some(i) = dismiss {
@@ -607,7 +611,7 @@ impl AdiutorApp {
             return;
         };
         let (mut ok, mut cancel) = (false, false);
-        egui::Modal::new(egui::Id::NULL.with("password")).show(ctx, |ui| {
+        let modal = egui::Modal::new(egui::Id::NULL.with("password")).show(ctx, |ui| {
             ui.heading(self.tr.t("password.title"));
             ui.label(
                 self.tr
@@ -624,6 +628,7 @@ impl AdiutorApp {
                 cancel = ui.button(self.tr.t("common.cancel")).clicked();
             });
         });
+        cancel |= !ok && modal.should_close();
         if ok || cancel {
             self.passwords.pop_front();
             let password = std::mem::take(&mut self.password_text);
@@ -741,23 +746,70 @@ impl eframe::App for AdiutorApp {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use egui_kittest::Harness;
+    use egui_kittest::kittest::Queryable;
 
-    fn p(index: u32) -> PageRef {
-        PageRef { doc: 0, index }
+    #[test]
+    fn messages_are_translated_when_drawn() {
+        let m: Message = ("save.done", vec![("file", "a.pdf".into())]);
+        assert_eq!(message_text(&Tr::new(Lang::En), &m), "Saved a.pdf");
+        assert_eq!(message_text(&Tr::new(Lang::It), &m), "Salvato a.pdf");
+    }
+
+    /// Shows the overwrite modal in a harness; the state keeps its first answer.
+    fn overwrite_harness() -> Harness<'static, Option<bool>> {
+        let tr = Tr::new(Lang::En);
+        let mut harness = Harness::new_ui_state(
+            move |ui, answer: &mut Option<bool>| {
+                let a = confirm_modal(
+                    ui.ctx(),
+                    &tr,
+                    "overwrite",
+                    "save.overwrite_title",
+                    "out.pdf already exists. Replace it?",
+                    "save.overwrite_confirm",
+                );
+                *answer = answer.or(a);
+            },
+            None,
+        );
+        harness.run();
+        assert_eq!(*harness.state(), None, "no answer before input");
+        harness
     }
 
     #[test]
-    fn covers_all_only_for_every_page_in_order() {
-        let all = [p(0), p(1), p(2)];
-        let job = |pages: &[PageRef]| (pages.to_vec(), PathBuf::new());
-        assert!(covers_all(&[job(&all)], &all));
-        assert!(covers_all(&[job(&[p(0)]), job(&[p(1), p(2)])], &all));
-        assert!(!covers_all(&[job(&[p(0), p(1)])], &all), "selection");
-        assert!(!covers_all(&[job(&[p(0)]), job(&[p(2)])], &all), "gap");
-        assert!(
-            !covers_all(&[job(&[p(1), p(2)]), job(&[p(0)])], &all),
-            "order"
-        );
-        assert!(!covers_all(&[job(&all), job(&[p(0)])], &all), "extra");
+    fn overwrite_modal_replace() {
+        let mut harness = overwrite_harness();
+        harness.get_by_label("Replace").click();
+        harness.run();
+        assert_eq!(*harness.state(), Some(true));
+    }
+
+    #[test]
+    fn overwrite_modal_cancel() {
+        let mut harness = overwrite_harness();
+        harness.get_by_label("Cancel").click();
+        harness.run();
+        assert_eq!(*harness.state(), Some(false));
+    }
+
+    #[test]
+    fn overwrite_modal_click_outside_cancels() {
+        let mut harness = overwrite_harness();
+        let corner = egui::pos2(2.0, 2.0);
+        harness.hover_at(corner);
+        harness.drag_at(corner);
+        harness.drop_at(corner);
+        harness.run();
+        assert_eq!(*harness.state(), Some(false));
+    }
+
+    #[test]
+    fn overwrite_modal_escape_cancels() {
+        let mut harness = overwrite_harness();
+        harness.key_press(egui::Key::Escape);
+        harness.run();
+        assert_eq!(*harness.state(), Some(false));
     }
 }

@@ -27,7 +27,15 @@ The AppImage bundles PDFium only. The system must provide:
 - OpenGL 2 or newer
 - `libxkbcommon-x11` (X11 sessions)
 - an XDG desktop portal for the file dialogs, for example `xdg-desktop-portal-gtk`; without one, `zenity` is
-  used instead (also needed for the "replace file?" question)
+  used instead
+
+### macOS notes
+
+- Choosing Quit from the Dock, or logging out with the app open, closes it **without** the
+  unsaved-changes prompt (a limitation of winit 0.30, the windowing library). Cmd+Q and the window's close button
+  do show the prompt.
+- The default macOS app menu (Hide, About, ...) is intentionally turned off, so that Cmd+Q reaches the app and
+  goes through the unsaved-changes prompt.
 
 ## Usage
 
@@ -37,7 +45,8 @@ The AppImage bundles PDFium only. The system must provide:
    numbers in **Pages** and press Enter or **Select**.
 3. Drag selected pages to reorder them; press Delete or Backspace to remove them.
 4. **Save all as one PDF** writes the grid in its current order. **Save selection** writes only the selected pages.
-   **Split** writes one file per page-number group (see below) into a folder you choose.
+   **Split** writes one file per page-number group (see below) into a folder you choose. Closing the window with
+   **Close anyway** during a split keeps the files already written (each one complete) and stops the rest.
 
 ### Page numbers
 
