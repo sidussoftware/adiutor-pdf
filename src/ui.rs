@@ -40,6 +40,8 @@ pub struct AdiutorApp {
     passwords: VecDeque<(PathBuf, bool)>,
     password_text: String,
     close_prompt: bool,
+    /// A save to an existing file (name had no ".pdf") waiting for the user's confirmation.
+    pending_overwrite: Option<(Vec<PageRef>, PathBuf)>,
     /// The user confirmed closing; stops the cancel loop.
     closing: bool,
     /// The engine thread ended; its error was already shown.
@@ -103,6 +105,7 @@ impl AdiutorApp {
             passwords: VecDeque::new(),
             password_text: String::new(),
             close_prompt: false,
+            pending_overwrite: None,
             closing: false,
             engine_dead: false,
         };
@@ -275,28 +278,13 @@ impl AdiutorApp {
         else {
             return;
         };
-        if !dest
+        let appended = !dest
             .extension()
-            .is_some_and(|e| e.eq_ignore_ascii_case("pdf"))
-        {
+            .is_some_and(|e| e.eq_ignore_ascii_case("pdf"));
+        if appended {
             let mut name = OsString::from(dest.file_name().unwrap_or_default());
             name.push(".pdf");
             dest.set_file_name(name);
-            // The dialog checked the name without ".pdf", so ask before replacing this file.
-            if dest.exists() && !self.workspace.is_source_path(&dest) {
-                let answer = rfd::MessageDialog::new()
-                    .set_level(rfd::MessageLevel::Warning)
-                    .set_title(self.tr.t("save.overwrite_title"))
-                    .set_description(
-                        self.tr
-                            .tf("save.overwrite_body", &[("file", &file_name(&dest))]),
-                    )
-                    .set_buttons(rfd::MessageButtons::YesNo)
-                    .show();
-                if answer != rfd::MessageDialogResult::Yes {
-                    return;
-                }
-            }
         }
         let pages = if selection_only {
             self.workspace
@@ -304,6 +292,11 @@ impl AdiutorApp {
         } else {
             self.workspace.all_pages()
         };
+        // The dialog checked the name without ".pdf", so ask before replacing this file.
+        if appended && dest.exists() && !self.workspace.is_source_path(&dest) {
+            self.pending_overwrite = Some((pages, dest));
+            return;
+        }
         self.start_batch(vec![(pages, dest)], None);
     }
 
@@ -617,6 +610,29 @@ impl AdiutorApp {
         }
     }
 
+    fn overwrite_modal(&mut self, ctx: &egui::Context) {
+        let Some((_, dest)) = &self.pending_overwrite else {
+            return;
+        };
+        let body = self
+            .tr
+            .tf("save.overwrite_body", &[("file", &file_name(dest))]);
+        let (mut replace, mut cancel) = (false, false);
+        egui::Modal::new(egui::Id::NULL.with("overwrite")).show(ctx, |ui| {
+            ui.heading(self.tr.t("save.overwrite_title"));
+            ui.label(body);
+            ui.horizontal(|ui| {
+                replace = ui.button(self.tr.t("save.overwrite_confirm")).clicked();
+                cancel = ui.button(self.tr.t("common.cancel")).clicked();
+            });
+        });
+        if replace && let Some((pages, dest)) = self.pending_overwrite.take() {
+            self.start_batch(vec![(pages, dest)], None);
+        } else if cancel {
+            self.pending_overwrite = None;
+        }
+    }
+
     fn close_modal(&mut self, ctx: &egui::Context) {
         if !self.close_prompt {
             return;
@@ -666,7 +682,8 @@ impl eframe::App for AdiutorApp {
             self.close_prompt = true;
         }
 
-        let modal_open = self.close_prompt || !self.passwords.is_empty();
+        let modal_open =
+            self.close_prompt || !self.passwords.is_empty() || self.pending_overwrite.is_some();
         let delete = !modal_open
             && !ctx.egui_wants_keyboard_input()
             && ctx
@@ -684,6 +701,7 @@ impl eframe::App for AdiutorApp {
         egui::Panel::bottom("bottom_bar").show(ui, |ui| self.bottom_bar(ui));
         egui::CentralPanel::default().show(ui, |ui| self.grid(ui));
         self.password_modal(&ctx);
+        self.overwrite_modal(&ctx);
         self.close_modal(&ctx);
     }
 }

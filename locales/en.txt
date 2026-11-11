@@ -23,6 +23,7 @@ save.blocked_original = Choose another name: the original file is never overwrit
 save.failed = Cannot save {file}: {reason}
 save.overwrite_title = Replace file?
 save.overwrite_body = {file} already exists. Replace it?
+save.overwrite_confirm = Replace
 save.done = Saved {file}
 save.progress = Saving... {done} of {total}
 split.done = Created {count} files in {folder}
