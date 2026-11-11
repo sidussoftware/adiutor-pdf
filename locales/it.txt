@@ -28,3 +28,4 @@ close.unsaved_title = Modifiche non salvate
 close.unsaved_body = Ci sono modifiche non salvate. Chiudere comunque?
 close.confirm = Chiudi comunque
 error.internal = Errore interno, riavvia l'app
+error.engine_start = Impossibile avviare il motore PDF:\n{reason}
