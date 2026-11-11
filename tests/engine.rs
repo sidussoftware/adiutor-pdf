@@ -345,3 +345,37 @@ fn tall_page_thumbnail_height_is_capped() {
         _ => unreachable!(),
     }
 }
+
+#[test]
+fn dropping_engine_during_save_leaves_no_temp_file() {
+    let _serial = serial();
+    let Some(engine) = engine() else { return };
+    let dir = tempfile::tempdir().unwrap();
+    let (src, dest) = (dir.path().join("big.pdf"), dir.path().join("out.pdf"));
+    make_pdf(&src, &[(100.0, 100.0); 2000]);
+    let doc = open_ok(&engine, &src);
+    // Every other page, so the copy is 1000 runs and the shutdown check between runs is hit.
+    let pages = (0..2000).step_by(2).map(|i| page(doc, i)).collect();
+    save(&engine, 3, pages, dest.clone());
+    drop(engine);
+    // Drop joins the worker, so the folder is final here. The save may have won the race and
+    // completed (dest is a full copy), but a temp file must never be left behind.
+    let list = || {
+        let mut names: Vec<String> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name().into_string().unwrap())
+            .collect();
+        names.sort();
+        names
+    };
+    let names = list();
+    std::thread::sleep(Duration::from_millis(1500));
+    assert_eq!(list(), names, "the worker kept writing after drop");
+    assert!(
+        names.iter().all(|n| n == "big.pdf" || n == "out.pdf"),
+        "leftover files: {names:?}"
+    );
+    if dest.exists() {
+        assert_eq!(sizes_of(&dest).len(), 1000, "dest exists but is incomplete");
+    }
+}
