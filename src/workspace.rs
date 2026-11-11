@@ -266,6 +266,26 @@ fn split_names_with(
         .collect()
 }
 
+/// `split_names`, also bumping every name for which `taken` reports an existing file: catches
+/// clashes the name comparison misses (case-insensitive or normalizing file systems, new files).
+pub fn free_split_names(
+    stem: &str,
+    groups: &[Vec<usize>],
+    existing: &HashSet<String>,
+    taken: impl Fn(&str) -> bool,
+) -> Vec<String> {
+    let mut existing = existing.clone();
+    loop {
+        let names = split_names(stem, groups, &existing);
+        // Clashes are never in `existing`, so it grows each round and the loop ends.
+        let clashes: Vec<String> = names.iter().filter(|n| taken(n)).cloned().collect();
+        if clashes.is_empty() {
+            return names;
+        }
+        existing.extend(clashes);
+    }
+}
+
 /// File stem of the source document of the first page in the grid.
 pub fn split_stem(ws: &Workspace) -> Option<String> {
     let first = ws.slots().first()?;
@@ -404,6 +424,13 @@ mod tests {
             split_names_with("doc", &g, &existing, false),
             ["doc_p1.pdf"]
         );
+    }
+
+    #[test]
+    fn free_split_names_skips_taken_files() {
+        let taken = |n: &str| n == "doc_p1.pdf" || n == "doc_p1 (2).pdf";
+        let names = free_split_names("doc", &[vec![0], vec![1]], &HashSet::new(), taken);
+        assert_eq!(names, ["doc_p1 (3).pdf", "doc_p2.pdf"]);
     }
 
     #[test]

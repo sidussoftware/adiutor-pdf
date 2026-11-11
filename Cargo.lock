@@ -119,6 +119,7 @@ dependencies = [
  "rfd",
  "sys-locale",
  "tempfile",
+ "winit",
 ]
 
 [[package]]

@@ -4,7 +4,7 @@ use crate::engine::{Command, Engine, Event};
 use crate::i18n::{Lang, Tr};
 use crate::ranges::{self, RangeError};
 use crate::thumb_cache::ThumbCache;
-use crate::workspace::{PageRef, SourceDoc, Workspace, split_names, split_stem};
+use crate::workspace::{PageRef, SourceDoc, Workspace, free_split_names, split_stem};
 use eframe::egui::{self, Color32, Sense, TextureHandle, TextureOptions, vec2};
 use std::collections::{HashSet, VecDeque};
 use std::ffi::OsString;
@@ -42,6 +42,8 @@ pub struct AdiutorApp {
     close_prompt: bool,
     /// The user confirmed closing; stops the cancel loop.
     closing: bool,
+    /// The engine thread ended; its error was already shown.
+    engine_dead: bool,
 }
 
 /// Jobs of one Save or Split that have not finished yet.
@@ -53,6 +55,13 @@ struct Batch {
     split_folder: Option<PathBuf>,
     /// The page list when the batch started; `mark_saved` only if it is unchanged at the end.
     pages: Vec<PageRef>,
+    /// The jobs write every page of `pages`, in order (Save all, or a full split).
+    covers_all: bool,
+}
+
+/// True if the jobs' pages, concatenated in job order, are exactly `all`.
+fn covers_all(jobs: &[(Vec<PageRef>, PathBuf)], all: &[PageRef]) -> bool {
+    jobs.iter().flat_map(|(pages, _)| pages).eq(all)
 }
 
 fn range_error_text(tr: &Tr, e: &RangeError) -> String {
@@ -95,6 +104,7 @@ impl AdiutorApp {
             password_text: String::new(),
             close_prompt: false,
             closing: false,
+            engine_dead: false,
         };
         for path in startup_paths {
             app.open(path);
@@ -106,6 +116,13 @@ impl AdiutorApp {
         if let Ok(engine) = &self.engine
             && engine.send(cmd).is_err()
         {
+            self.engine_died();
+        }
+    }
+
+    /// Shows the internal error once, however often the dead engine is used.
+    fn engine_died(&mut self) {
+        if !std::mem::replace(&mut self.engine_dead, true) {
             self.error(self.tr.t("error.internal").to_string());
         }
     }
@@ -129,7 +146,7 @@ impl AdiutorApp {
                     Ok(Some(event)) => event,
                     Ok(None) => return,
                     Err(_) => {
-                        self.error(self.tr.t("error.internal").to_string());
+                        self.engine_died();
                         return;
                     }
                 },
@@ -215,7 +232,7 @@ impl AdiutorApp {
             );
             self.messages.push(text);
         }
-        if !b.failed && self.workspace.all_pages() == b.pages {
+        if !b.failed && b.covers_all && self.workspace.all_pages() == b.pages {
             self.workspace.mark_saved();
         }
     }
@@ -227,6 +244,8 @@ impl AdiutorApp {
             self.messages.push(text);
             return;
         }
+        let pages = self.workspace.all_pages();
+        let covers_all = covers_all(&jobs, &pages);
         let mut pending = HashSet::new();
         for (pages, dest) in jobs {
             let job = self.next_job;
@@ -240,7 +259,8 @@ impl AdiutorApp {
             ok: 0,
             failed: false,
             split_folder,
-            pages: self.workspace.all_pages(),
+            pages,
+            covers_all,
         });
     }
 
@@ -262,6 +282,21 @@ impl AdiutorApp {
             let mut name = OsString::from(dest.file_name().unwrap_or_default());
             name.push(".pdf");
             dest.set_file_name(name);
+            // The dialog checked the name without ".pdf", so ask before replacing this file.
+            if dest.exists() && !self.workspace.is_source_path(&dest) {
+                let answer = rfd::MessageDialog::new()
+                    .set_level(rfd::MessageLevel::Warning)
+                    .set_title(self.tr.t("save.overwrite_title"))
+                    .set_description(
+                        self.tr
+                            .tf("save.overwrite_body", &[("file", &file_name(&dest))]),
+                    )
+                    .set_buttons(rfd::MessageButtons::YesNo)
+                    .show();
+                if answer != rfd::MessageDialogResult::Yes {
+                    return;
+                }
+            }
         }
         let pages = if selection_only {
             self.workspace
@@ -309,7 +344,7 @@ impl AdiutorApp {
                 return;
             }
         };
-        let names = split_names(&stem, &groups, &existing);
+        let names = free_split_names(&stem, &groups, &existing, |n| folder.join(n).exists());
         let jobs = groups
             .iter()
             .zip(names)
@@ -617,6 +652,12 @@ impl eframe::App for AdiutorApp {
             self.open(path);
         }
 
+        // The default macOS menu is off (see lib.rs), so Cmd+Q arrives here as a key press.
+        #[cfg(target_os = "macos")]
+        if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::Q)) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        }
+
         if ctx.input(|i| i.viewport().close_requested())
             && !self.closing
             && (self.workspace.is_dirty() || self.batch.is_some())
@@ -644,5 +685,29 @@ impl eframe::App for AdiutorApp {
         egui::CentralPanel::default().show(ui, |ui| self.grid(ui));
         self.password_modal(&ctx);
         self.close_modal(&ctx);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn p(index: u32) -> PageRef {
+        PageRef { doc: 0, index }
+    }
+
+    #[test]
+    fn covers_all_only_for_every_page_in_order() {
+        let all = [p(0), p(1), p(2)];
+        let job = |pages: &[PageRef]| (pages.to_vec(), PathBuf::new());
+        assert!(covers_all(&[job(&all)], &all));
+        assert!(covers_all(&[job(&[p(0)]), job(&[p(1), p(2)])], &all));
+        assert!(!covers_all(&[job(&[p(0), p(1)])], &all), "selection");
+        assert!(!covers_all(&[job(&[p(0)]), job(&[p(2)])], &all), "gap");
+        assert!(
+            !covers_all(&[job(&[p(1), p(2)]), job(&[p(0)])], &all),
+            "order"
+        );
+        assert!(!covers_all(&[job(&all), job(&[p(0)])], &all), "extra");
     }
 }
