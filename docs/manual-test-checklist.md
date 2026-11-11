@@ -25,13 +25,27 @@ Tick an item only after doing it on a real build. Tasks 7 and 8 add their checks
 - [x] Delete removes the selected pages; Backspace inside the Pages field edits text and deletes no page
 - [ ] Drag to the end of the list and between rows; drag an unselected page (it becomes the selection first)
 ## Save
+- [x] Reorder, then "Save all as one PDF": the output has the pages in the grid order (pypdf page widths [300, 700, 400, 500, 600]) (Xvfb + xdg-desktop-portal-gtk, xdotool, screenshots)
+- [x] "Save selection" writes only the selected page; default name is `<first source>_edited.pdf` (Xvfb + xdg-desktop-portal-gtk, xdotool, screenshots)
+- [x] Saving over an open source file shows "Choose another name..." and leaves the file unchanged (Xvfb + xdg-desktop-portal-gtk, xdotool, screenshots)
+- [x] Messages stack at the bottom and each Close button dismisses its own line
+- [ ] Progress bar visible while saving a large file; Save/Split disabled meanwhile
 ## Split
+- [x] Empty Pages field splits into one file per page (`A_p1.pdf` ... `A_p5.pdf`) (Xvfb + xdg-desktop-portal-gtk, xdotool, screenshots)
+- [x] Split `1, 1` twice into the same folder gives `_p1.pdf`, `_p1 (2).pdf`, `_p1 (3).pdf`, `_p1 (4).pdf` (Xvfb + xdg-desktop-portal-gtk, xdotool, screenshots)
+- [x] Split reports "Created N files in <folder>"
 ## Password
+- [x] `tests/fixtures/encrypted.pdf`: wrong password shows "Wrong password, try again" (field masked), then `secret` opens it (Xvfb + xdg-desktop-portal-gtk, xdotool, screenshots)
+- [ ] Cancel skips the file; several encrypted files queue one modal at a time
 ## Errors
-- [ ] Opening a corrupt file shows a message line at the bottom
+- [x] Saving into a read-only folder shows "Cannot save ..." and leaves no `.adiutor-tmp` file (`chattr +i` folder, running as root)
+- [x] Opening a corrupt file shows a message line at the bottom (Xvfb screenshot)
 
 ## Close
+- [x] Delete a page, then close the window: "Unsaved changes" modal; Cancel keeps the app open; "Close anyway" exits (WM_DELETE_WINDOW sent with python-xlib)
+- [ ] After saving, closing does not ask
 ## Language
+- [x] Language combo switches the whole UI between English and Italiano immediately (Xvfb screenshot)
 - [ ] With `LANG=it_IT.UTF-8` the UI is Italian
 
 ## Performance

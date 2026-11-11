@@ -160,8 +160,14 @@ impl Workspace {
             .iter()
             .partition(|s| self.selected.contains(&s.id));
         rest.splice(unselected_before..unselected_before, moved);
-        self.slots = rest;
-        self.dirty = true;
+        if rest
+            .iter()
+            .map(|s| s.id)
+            .ne(self.slots.iter().map(|s| s.id))
+        {
+            self.slots = rest;
+            self.dirty = true;
+        }
     }
 
     pub fn delete_selected(&mut self) {
@@ -362,6 +368,15 @@ mod tests {
         ws.select_only(0);
         ws.move_selected_to(2);
         assert!(ws.is_dirty());
+    }
+
+    #[test]
+    fn move_to_same_place_is_not_dirty() {
+        let mut ws = ws_with(&[3]);
+        ws.mark_saved();
+        ws.select_only(1);
+        ws.move_selected_to(1);
+        assert!(!ws.is_dirty());
     }
 
     #[test]

@@ -1,12 +1,14 @@
 //! Main window: toolbar, thumbnail grid and bottom bar.
 
 use crate::engine::{Command, Engine, Event};
-use crate::i18n::Tr;
+use crate::i18n::{Lang, Tr};
 use crate::ranges::{self, RangeError};
 use crate::thumb_cache::ThumbCache;
-use crate::workspace::{PageRef, SourceDoc, Workspace};
+use crate::workspace::{PageRef, SourceDoc, Workspace, split_names, split_stem};
 use eframe::egui::{self, Color32, Sense, TextureHandle, TextureOptions, vec2};
-use std::path::PathBuf;
+use std::collections::{HashSet, VecDeque};
+use std::ffi::OsString;
+use std::path::{Path, PathBuf};
 
 const THUMB_CACHE_CAP: usize = 300;
 /// Thumbnail width in points; the engine renders it at `THUMB_WIDTH * pixels_per_point`.
@@ -24,11 +26,31 @@ pub struct AdiutorApp {
     cache: ThumbCache<TextureHandle>,
     /// Last set sent with `Command::Visible`, to avoid resending an unchanged set.
     last_visible: Vec<PageRef>,
-    /// One-line message for the user (open failures, internal error).
-    message: Option<String>,
-    /// Contents of the Pages field and the translated parse error shown under it.
+    /// Dismissible messages at the bottom (failures, results).
+    messages: Vec<String>,
+    /// Contents of the Pages field and the parse error shown under it.
     pages_text: String,
-    pages_error: Option<String>,
+    pages_error: Option<RangeError>,
+    next_job: u64,
+    /// The running save or split, if any.
+    batch: Option<Batch>,
+    /// Latest `SaveProgress` of the running batch.
+    progress: Option<(usize, usize)>,
+    /// Encrypted files waiting for a password (path, previous attempt was wrong).
+    passwords: VecDeque<(PathBuf, bool)>,
+    password_text: String,
+    close_prompt: bool,
+    /// The user confirmed closing; stops the cancel loop.
+    closing: bool,
+}
+
+/// Jobs of one Save or Split that have not finished yet.
+struct Batch {
+    pending: HashSet<u64>,
+    ok: usize,
+    failed: bool,
+    /// Some for a split: the destination folder.
+    split_folder: Option<PathBuf>,
 }
 
 fn range_error_text(tr: &Tr, e: &RangeError) -> String {
@@ -46,6 +68,11 @@ fn range_error_text(tr: &Tr, e: &RangeError) -> String {
     }
 }
 
+fn file_name(path: &Path) -> String {
+    path.file_name()
+        .map_or_else(String::new, |n| n.to_string_lossy().into_owned())
+}
+
 impl AdiutorApp {
     pub fn new(ctx: &egui::Context, tr: Tr, startup_paths: Vec<PathBuf>) -> Self {
         let wake_ctx = ctx.clone();
@@ -56,9 +83,16 @@ impl AdiutorApp {
             tr,
             cache: ThumbCache::new(THUMB_CACHE_CAP),
             last_visible: Vec::new(),
-            message: None,
+            messages: Vec::new(),
             pages_text: String::new(),
             pages_error: None,
+            next_job: 0,
+            batch: None,
+            progress: None,
+            passwords: VecDeque::new(),
+            password_text: String::new(),
+            close_prompt: false,
+            closing: false,
         };
         for path in startup_paths {
             app.open(path);
@@ -70,8 +104,13 @@ impl AdiutorApp {
         if let Ok(engine) = &self.engine
             && engine.send(cmd).is_err()
         {
-            self.message = Some(self.tr.t("error.internal").to_string());
+            self.error(self.tr.t("error.internal").to_string());
         }
+    }
+
+    fn error(&mut self, text: String) {
+        eprintln!("{text}");
+        self.messages.push(text);
     }
 
     fn open(&mut self, path: PathBuf) {
@@ -88,7 +127,7 @@ impl AdiutorApp {
                     Ok(Some(event)) => event,
                     Ok(None) => return,
                     Err(_) => {
-                        self.message = Some(self.tr.t("error.internal").to_string());
+                        self.error(self.tr.t("error.internal").to_string());
                         return;
                     }
                 },
@@ -119,22 +158,147 @@ impl AdiutorApp {
                     self.cache.insert(page, tex);
                 }
                 Event::OpenFailed { path, reason } => {
-                    let file = path
-                        .file_name()
-                        .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
-                    self.message = Some(
-                        self.tr
-                            .tf("open.failed", &[("file", &file), ("reason", &reason)]),
+                    let text = self.tr.tf(
+                        "open.failed",
+                        &[("file", &file_name(&path)), ("reason", &reason)],
                     );
+                    self.error(text);
                 }
-                // Task 8 builds the password dialog.
-                Event::PasswordRequired { path, .. } => {
-                    eprintln!("password required for {}: not handled yet", path.display());
+                Event::PasswordRequired { path, wrong } => self.passwords.push_back((path, wrong)),
+                Event::SaveProgress { done, total, .. } => self.progress = Some((done, total)),
+                Event::Saved { job, dest } => {
+                    if self
+                        .batch
+                        .as_ref()
+                        .is_some_and(|b| b.split_folder.is_none())
+                    {
+                        let text = self.tr.tf("save.done", &[("file", &file_name(&dest))]);
+                        self.messages.push(text);
+                    }
+                    self.finish_job(job, true);
                 }
-                // Task 8 handles saving.
-                Event::SaveProgress { .. } | Event::Saved { .. } | Event::SaveFailed { .. } => {}
+                Event::SaveFailed { job, dest, reason } => {
+                    let text = self.tr.tf(
+                        "save.failed",
+                        &[("file", &file_name(&dest)), ("reason", &reason)],
+                    );
+                    self.error(text);
+                    self.finish_job(job, false);
+                }
             }
         }
+    }
+
+    fn finish_job(&mut self, job: u64, ok: bool) {
+        let Some(b) = &mut self.batch else { return };
+        if !b.pending.remove(&job) {
+            return;
+        }
+        b.ok += usize::from(ok);
+        b.failed |= !ok;
+        if !b.pending.is_empty() {
+            return;
+        }
+        let b = self.batch.take().expect("checked above");
+        self.progress = None;
+        if let Some(folder) = &b.split_folder
+            && b.ok > 0
+        {
+            let text = self.tr.tf(
+                "split.done",
+                &[
+                    ("count", &b.ok.to_string()),
+                    ("folder", &folder.to_string_lossy()),
+                ],
+            );
+            self.messages.push(text);
+        }
+        if !b.failed {
+            self.workspace.mark_saved();
+        }
+    }
+
+    /// Sends one `Save` per (pages, dest) and starts tracking them as a batch.
+    fn start_batch(&mut self, jobs: Vec<(Vec<PageRef>, PathBuf)>, split_folder: Option<PathBuf>) {
+        if jobs.iter().any(|(_, d)| self.workspace.is_source_path(d)) {
+            let text = self.tr.t("save.blocked_original").to_string();
+            self.messages.push(text);
+            return;
+        }
+        let mut pending = HashSet::new();
+        for (pages, dest) in jobs {
+            let job = self.next_job;
+            self.next_job += 1;
+            pending.insert(job);
+            self.send(Command::Save { job, pages, dest });
+        }
+        self.progress = None;
+        self.batch = Some(Batch {
+            pending,
+            ok: 0,
+            failed: false,
+            split_folder,
+        });
+    }
+
+    fn save(&mut self, selection_only: bool) {
+        let Some(stem) = split_stem(&self.workspace) else {
+            return;
+        };
+        let Some(mut dest) = rfd::FileDialog::new()
+            .add_filter("PDF", &["pdf"])
+            .set_file_name(format!("{stem}_edited.pdf"))
+            .save_file()
+        else {
+            return;
+        };
+        if !dest
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("pdf"))
+        {
+            let mut name = OsString::from(dest.file_name().unwrap_or_default());
+            name.push(".pdf");
+            dest.set_file_name(name);
+        }
+        let pages = if selection_only {
+            self.workspace
+                .pages_at(&self.workspace.selected_positions())
+        } else {
+            self.workspace.all_pages()
+        };
+        self.start_batch(vec![(pages, dest)], None);
+    }
+
+    fn split(&mut self) {
+        let Some(stem) = split_stem(&self.workspace) else {
+            return;
+        };
+        let mut groups = match ranges::parse(&self.pages_text, self.workspace.len()) {
+            Ok(g) => g,
+            Err(e) => {
+                self.pages_error = Some(e);
+                return;
+            }
+        };
+        if groups.is_empty() {
+            groups = (0..self.workspace.len()).map(|p| vec![p]).collect();
+        }
+        let Some(folder) = rfd::FileDialog::new().pick_folder() else {
+            return;
+        };
+        let existing: HashSet<String> = std::fs::read_dir(&folder)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter_map(|e| e.file_name().into_string().ok())
+            .collect();
+        let names = split_names(&stem, &groups, &existing);
+        let jobs = groups
+            .iter()
+            .zip(names)
+            .map(|(g, name)| (self.workspace.pages_at(g), folder.join(name)))
+            .collect();
+        self.start_batch(jobs, Some(folder));
     }
 
     fn toolbar(&mut self, ui: &mut egui::Ui) {
@@ -172,12 +336,47 @@ impl AdiutorApp {
                         self.pages_error = None;
                         self.workspace.set_selection(&groups.concat());
                     }
-                    Err(e) => self.pages_error = Some(range_error_text(&self.tr, &e)),
+                    Err(e) => self.pages_error = Some(e),
                 }
             }
+            let idle = self.batch.is_none();
+            let any = !self.workspace.is_empty();
+            let sel = !self.workspace.selected_positions().is_empty();
+            let enabled = |on: bool| idle && on;
+            let btn = |ui: &mut egui::Ui, on: bool, text: &str| {
+                ui.add_enabled(enabled(on), egui::Button::new(text))
+                    .clicked()
+            };
+            if btn(ui, any, self.tr.t("action.save_all")) {
+                self.save(false);
+            }
+            if btn(ui, sel, self.tr.t("action.save_selection")) {
+                self.save(true);
+            }
+            if btn(ui, any, self.tr.t("action.split")) {
+                self.split();
+            }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let mut lang = self.tr.lang();
+                egui::ComboBox::from_id_salt("language")
+                    .selected_text(lang.native_name())
+                    .show_ui(ui, |ui| {
+                        for l in Lang::ALL {
+                            ui.selectable_value(&mut lang, l, l.native_name());
+                        }
+                    });
+                ui.label(self.tr.t("toolbar.language"));
+                if lang != self.tr.lang() {
+                    self.tr = Tr::new(lang);
+                    let title = self.tr.t("app.title").to_string();
+                    ui.ctx()
+                        .send_viewport_cmd(egui::ViewportCommand::Title(title));
+                }
+            });
         });
-        if let Some(err) = &self.pages_error {
-            ui.colored_label(ui.visuals().error_fg_color, err);
+        if let Some(e) = &self.pages_error {
+            let text = range_error_text(&self.tr, e);
+            ui.colored_label(ui.visuals().error_fg_color, text);
         }
     }
 
@@ -308,10 +507,81 @@ impl AdiutorApp {
         }
     }
 
-    fn bottom_bar(&self, ui: &mut egui::Ui) {
-        if let Some(message) = &self.message {
-            ui.label(message);
+    fn bottom_bar(&mut self, ui: &mut egui::Ui) {
+        if self.batch.is_some() {
+            let (done, total) = self.progress.unwrap_or((0, 1));
+            let text = self.tr.tf(
+                "save.progress",
+                &[("done", &done.to_string()), ("total", &total.to_string())],
+            );
+            let frac = done as f32 / total.max(1) as f32;
+            ui.add(egui::ProgressBar::new(frac).text(text));
         }
+        let mut dismiss = None;
+        for (i, message) in self.messages.iter().enumerate() {
+            ui.horizontal(|ui| {
+                if ui.button(self.tr.t("common.close")).clicked() {
+                    dismiss = Some(i);
+                }
+                ui.label(message);
+            });
+        }
+        if let Some(i) = dismiss {
+            self.messages.remove(i);
+        }
+    }
+
+    fn password_modal(&mut self, ctx: &egui::Context) {
+        let Some((path, wrong)) = self.passwords.front().cloned() else {
+            return;
+        };
+        let (mut ok, mut cancel) = (false, false);
+        egui::Modal::new(egui::Id::NULL.with("password")).show(ctx, |ui| {
+            ui.heading(self.tr.t("password.title"));
+            ui.label(
+                self.tr
+                    .tf("password.prompt", &[("file", &file_name(&path))]),
+            );
+            if wrong {
+                ui.colored_label(ui.visuals().error_fg_color, self.tr.t("password.wrong"));
+            }
+            let edit = ui.add(egui::TextEdit::singleline(&mut self.password_text).password(true));
+            ok = edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+            edit.request_focus();
+            ui.horizontal(|ui| {
+                ok |= ui.button(self.tr.t("password.ok")).clicked();
+                cancel = ui.button(self.tr.t("common.cancel")).clicked();
+            });
+        });
+        if ok || cancel {
+            self.passwords.pop_front();
+            let password = std::mem::take(&mut self.password_text);
+            if ok {
+                self.send(Command::Open {
+                    path,
+                    password: Some(password),
+                });
+            }
+        }
+    }
+
+    fn close_modal(&mut self, ctx: &egui::Context) {
+        if !self.close_prompt {
+            return;
+        }
+        egui::Modal::new(egui::Id::NULL.with("close")).show(ctx, |ui| {
+            ui.heading(self.tr.t("close.unsaved_title"));
+            ui.label(self.tr.t("close.unsaved_body"));
+            ui.horizontal(|ui| {
+                if ui.button(self.tr.t("close.confirm")).clicked() {
+                    self.closing = true;
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                }
+                if ui.button(self.tr.t("common.cancel")).clicked() {
+                    self.close_prompt = false;
+                }
+            });
+        });
     }
 }
 
@@ -330,6 +600,14 @@ impl eframe::App for AdiutorApp {
             self.open(path);
         }
 
+        if ctx.input(|i| i.viewport().close_requested())
+            && !self.closing
+            && self.workspace.is_dirty()
+        {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            self.close_prompt = true;
+        }
+
         let delete = !ctx.egui_wants_keyboard_input()
             && ctx
                 .input(|i| i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace));
@@ -345,5 +623,7 @@ impl eframe::App for AdiutorApp {
         egui::Panel::top("toolbar").show(ui, |ui| self.toolbar(ui));
         egui::Panel::bottom("bottom_bar").show(ui, |ui| self.bottom_bar(ui));
         egui::CentralPanel::default().show(ui, |ui| self.grid(ui));
+        self.password_modal(&ctx);
+        self.close_modal(&ctx);
     }
 }
