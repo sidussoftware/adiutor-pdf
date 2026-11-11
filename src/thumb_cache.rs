@@ -8,6 +8,8 @@ pub struct ThumbCache<V> {
     max_bytes: usize,
     bytes: usize,
     tick: u64,
+    /// `tick` at the last `begin_frame`; entries used after it are on screen and never evicted.
+    frame_start: u64,
     /// value, last use, size in bytes
     map: HashMap<PageRef, (V, u64, usize)>,
 }
@@ -18,6 +20,7 @@ impl<V> ThumbCache<V> {
             max_bytes,
             bytes: 0,
             tick: 0,
+            frame_start: 0,
             map: HashMap::new(),
         }
     }
@@ -32,8 +35,9 @@ impl<V> ThumbCache<V> {
         })
     }
 
-    /// Evicts least recently used entries until the total is within `max_bytes`; the new entry
-    /// is always kept, even if it alone is larger.
+    /// Evicts least recently used entries until the total is within `max_bytes`, but never one
+    /// used since `begin_frame` (so the new entry is always kept): the cache can exceed the
+    /// budget by at most one screen of thumbnails instead of evicting visible ones forever.
     pub fn insert(&mut self, key: PageRef, value: V, bytes: usize) {
         self.tick += 1;
         if let Some((_, _, old)) = self.map.insert(key, (value, self.tick, bytes)) {
@@ -42,16 +46,23 @@ impl<V> ThumbCache<V> {
         self.bytes += bytes;
         // shortcut: linear scan for the oldest entry, fine for the few hundred thumbnails the UI's
         // budget holds; use a linked list if the budget or entry count grows a lot
-        while self.bytes > self.max_bytes && self.map.len() > 1 {
+        while self.bytes > self.max_bytes {
             let oldest = self
                 .map
                 .iter()
                 .min_by_key(|(_, (_, t, _))| *t)
+                .filter(|(_, (_, t, _))| *t <= self.frame_start)
                 .map(|(k, _)| *k);
-            if let Some((_, _, b)) = oldest.and_then(|k| self.map.remove(&k)) {
-                self.bytes -= b;
-            }
+            let Some((_, _, b)) = oldest.and_then(|k| self.map.remove(&k)) else {
+                break;
+            };
+            self.bytes -= b;
         }
+    }
+
+    /// Call before each draw that `get`s the visible entries.
+    pub fn begin_frame(&mut self) {
+        self.frame_start = self.tick;
     }
 
     pub fn clear(&mut self) {
@@ -73,6 +84,7 @@ mod tests {
         let mut c = ThumbCache::new(2);
         c.insert(p(0), 'a', 1);
         c.insert(p(1), 'b', 1);
+        c.begin_frame();
         assert_eq!(c.get(&p(0)), Some(&'a'));
         c.insert(p(2), 'c', 1);
         assert_eq!(c.get(&p(1)), None);
@@ -85,6 +97,7 @@ mod tests {
         let mut c = ThumbCache::new(2);
         c.insert(p(0), 'a', 1);
         c.insert(p(0), 'b', 1);
+        c.begin_frame();
         // If the update had counted its bytes twice, this insert would evict one.
         c.insert(p(1), 'c', 1);
         assert_eq!(c.get(&p(0)), Some(&'b'));
@@ -92,18 +105,40 @@ mod tests {
     }
 
     #[test]
+    fn never_evicts_entries_used_this_frame() {
+        let mut c = ThumbCache::new(2);
+        c.begin_frame();
+        c.insert(p(0), 'a', 1);
+        c.insert(p(1), 'b', 1);
+        c.insert(p(2), 'c', 1); // over budget, but all three are on screen
+        assert_eq!(c.get(&p(0)), Some(&'a'));
+        assert_eq!(c.get(&p(1)), Some(&'b'));
+        assert_eq!(c.get(&p(2)), Some(&'c'));
+        c.begin_frame();
+        assert_eq!(c.get(&p(2)), Some(&'c'));
+        c.insert(p(3), 'd', 1); // p(0) and p(1) were not used this frame
+        assert_eq!(c.get(&p(0)), None);
+        assert_eq!(c.get(&p(1)), None);
+        assert_eq!(c.get(&p(2)), Some(&'c'));
+        assert_eq!(c.get(&p(3)), Some(&'d'));
+    }
+
+    #[test]
     fn evicts_by_bytes_and_keeps_an_oversized_new_entry() {
         let mut c = ThumbCache::new(10);
         c.insert(p(0), 'a', 4);
         c.insert(p(1), 'b', 4);
+        c.begin_frame();
         c.insert(p(2), 'c', 4); // 12 > 10: the oldest goes
         assert_eq!(c.get(&p(0)), None);
         assert_eq!(c.get(&p(1)), Some(&'b'));
         assert_eq!(c.get(&p(2)), Some(&'c'));
+        c.begin_frame();
         c.insert(p(3), 'd', 50); // larger than the budget on its own
         assert_eq!(c.get(&p(1)), None);
         assert_eq!(c.get(&p(2)), None);
         assert_eq!(c.get(&p(3)), Some(&'d'));
+        c.begin_frame();
         c.insert(p(4), 'e', 1); // the oversized entry is evicted in turn
         assert_eq!(c.get(&p(3)), None);
         assert_eq!(c.get(&p(4)), Some(&'e'));

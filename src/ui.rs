@@ -438,6 +438,8 @@ impl AdiutorApp {
             self.cache.clear();
             self.last_visible.clear();
         }
+        // Thumbnails drawn from here on are on screen; inserts until the next draw keep them.
+        self.cache.begin_frame();
         let mut visible: Vec<PageRef> = Vec::new();
         let mut action: Option<GridAction> = None;
         // Cell rects by grid position, collected while dragging to find the drop target.
