@@ -51,6 +51,8 @@ struct Batch {
     failed: bool,
     /// Some for a split: the destination folder.
     split_folder: Option<PathBuf>,
+    /// The page list when the batch started; `mark_saved` only if it is unchanged at the end.
+    pages: Vec<PageRef>,
 }
 
 fn range_error_text(tr: &Tr, e: &RangeError) -> String {
@@ -213,7 +215,7 @@ impl AdiutorApp {
             );
             self.messages.push(text);
         }
-        if !b.failed {
+        if !b.failed && self.workspace.all_pages() == b.pages {
             self.workspace.mark_saved();
         }
     }
@@ -238,6 +240,7 @@ impl AdiutorApp {
             ok: 0,
             failed: false,
             split_folder,
+            pages: self.workspace.all_pages(),
         });
     }
 
@@ -286,12 +289,26 @@ impl AdiutorApp {
         let Some(folder) = rfd::FileDialog::new().pick_folder() else {
             return;
         };
-        let existing: HashSet<String> = std::fs::read_dir(&folder)
-            .into_iter()
-            .flatten()
-            .flatten()
-            .filter_map(|e| e.file_name().into_string().ok())
-            .collect();
+        // An unreadable folder aborts: with an incomplete list a split could overwrite files.
+        let listing: Result<Vec<_>, _> =
+            std::fs::read_dir(&folder).and_then(|rd| rd.collect::<Result<Vec<_>, _>>());
+        let existing: HashSet<String> = match listing {
+            Ok(entries) => entries
+                .into_iter()
+                .filter_map(|e| e.file_name().into_string().ok())
+                .collect(),
+            Err(e) => {
+                let text = self.tr.tf(
+                    "save.failed",
+                    &[
+                        ("file", &folder.to_string_lossy()),
+                        ("reason", &e.to_string()),
+                    ],
+                );
+                self.error(text);
+                return;
+            }
+        };
         let names = split_names(&stem, &groups, &existing);
         let jobs = groups
             .iter()
@@ -602,13 +619,15 @@ impl eframe::App for AdiutorApp {
 
         if ctx.input(|i| i.viewport().close_requested())
             && !self.closing
-            && self.workspace.is_dirty()
+            && (self.workspace.is_dirty() || self.batch.is_some())
         {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             self.close_prompt = true;
         }
 
-        let delete = !ctx.egui_wants_keyboard_input()
+        let modal_open = self.close_prompt || !self.passwords.is_empty();
+        let delete = !modal_open
+            && !ctx.egui_wants_keyboard_input()
             && ctx
                 .input(|i| i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace));
         if delete {
