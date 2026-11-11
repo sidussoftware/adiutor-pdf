@@ -1,21 +1,71 @@
 # adiutor-pdf
 
-A small, fully offline desktop app for PDF page operations: merge, split, reorder and delete pages.
+A small, fully offline desktop app for PDF page operations: merge several PDFs, reorder and delete pages, and save
+the result as one file or split it into pieces. Original files are never overwritten. English and Italian UI.
 
-**Status:** in development.
+## Download
 
-## License
+Get the package for your system from the [Releases](../../releases) page:
 
-Dual-licensed under either of [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE), at your option.
+| System  | File                                    |
+|---------|-----------------------------------------|
+| Windows | `adiutor-pdf-vX.Y.Z-windows-x64.zip`    |
+| macOS   | `adiutor-pdf-vX.Y.Z-macos-universal.zip` (Intel and Apple Silicon) |
+| Linux   | `adiutor-pdf-vX.Y.Z-linux-x86_64.AppImage` |
 
-## Development
+### First launch (builds are not code-signed)
 
-PDFium is loaded at runtime. Fetch a prebuilt copy (platform is one of `linux-x64`, `win-x64`, `mac-x64`, `mac-arm64`):
+- **Windows:** unzip, run `adiutor-pdf.exe`. If SmartScreen appears: **More info -> Run anyway**.
+- **macOS:** unzip, then right-click `adiutor-pdf.app` -> **Open** -> Open. Or: System Settings -> Privacy &
+  Security -> **Open Anyway**.
+- **Linux:** `chmod +x adiutor-pdf-*.AppImage`, then run it.
+
+### Linux requirements
+
+The AppImage bundles PDFium only. The system must provide:
+
+- OpenGL 2 or newer
+- `libxkbcommon-x11` (X11 sessions)
+- an XDG desktop portal for the file dialogs, for example `xdg-desktop-portal-gtk`
+
+## Usage
+
+1. **Add PDF** (or drop files on the window, or pass them as arguments). All pages appear in one grid, numbered
+   from 1. Password-protected files ask for the password.
+2. Click a page to select it; Ctrl+click toggles; Shift+click selects a range. Or type page numbers in **Pages**
+   and press Enter or **Select**.
+3. Drag selected pages to reorder them; press Delete or Backspace to remove them.
+4. **Save all as one PDF** writes the grid in its current order. **Save selection** writes only the selected pages.
+   **Split** writes one file per page-number group (see below) into a folder you choose.
+
+### Page numbers
+
+Positions in the current grid, starting at 1, comma-separated: `1-3, 5` selects pages 1, 2, 3 and 5. With
+**Split**, each comma-separated item becomes its own file (`1-3, 5` gives two files); an empty field gives one
+file per page.
+
+## Build from source
+
+Needs Rust 1.95+. On Linux also `libgtk-3-dev libxkbcommon-dev libwayland-dev`. PDFium is loaded at runtime;
+fetch a prebuilt copy (platform: `linux-x64`, `win-x64`, `mac-x64`, `mac-arm64`):
 
 ```sh
 scripts/fetch-pdfium.sh linux-x64 pdfium
 export ADIUTOR_PDFIUM_DIR="$PWD/pdfium/lib"   # pdfium/bin on Windows
-cargo run
+cargo run --release
 ```
 
-`ADIUTOR_PDFIUM_DIR` names the folder holding the PDFium library (`libpdfium.so`, `pdfium.dll` or `libpdfium.dylib`).
+`ADIUTOR_PDFIUM_DIR` names the folder holding the PDFium library. Without it the app looks next to the
+executable, in `../Frameworks` and `../lib`, then in the system library path.
+
+## Making a release
+
+1. Bump `version` in `Cargo.toml` and merge to `main`.
+2. The *Release* workflow builds all three packages and creates a **draft** release `vX.Y.Z` (only if that
+   release or tag does not exist yet).
+3. Review the draft on the Releases page, then **Publish**. Publishing creates the tag.
+
+## License
+
+Dual-licensed under either of [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE), at your option. Release
+packages also include PDFium and its third-party licenses in `licenses/pdfium/`.

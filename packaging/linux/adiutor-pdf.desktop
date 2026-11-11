@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Adiutor PDF
+Comment=Merge, split, reorder and delete PDF pages
+Exec=adiutor-pdf %F
+Icon=adiutor-pdf
+Terminal=false
+Categories=Office;Utility;
+MimeType=application/pdf;
