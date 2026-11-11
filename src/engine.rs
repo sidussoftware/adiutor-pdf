@@ -127,7 +127,7 @@ impl Engine {
 }
 
 /// Groups consecutive pages of the same source into (doc, first..=last) runs.
-pub fn runs(pages: &[PageRef]) -> Vec<(DocId, std::ops::RangeInclusive<u32>)> {
+fn runs(pages: &[PageRef]) -> Vec<(DocId, std::ops::RangeInclusive<u32>)> {
     let mut out: Vec<(DocId, std::ops::RangeInclusive<u32>)> = Vec::new();
     for p in pages {
         match out.last_mut() {

@@ -45,18 +45,6 @@ impl<V> ThumbCache<V> {
             };
         }
     }
-
-    pub fn contains(&self, key: &PageRef) -> bool {
-        self.map.contains_key(key)
-    }
-
-    pub fn len(&self) -> usize {
-        self.map.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.map.is_empty()
-    }
 }
 
 #[cfg(test)]
@@ -74,7 +62,9 @@ mod tests {
         c.insert(p(1), 'b');
         assert_eq!(c.get(&p(0)), Some(&'a'));
         c.insert(p(2), 'c');
-        assert!(c.contains(&p(0)) && c.contains(&p(2)) && !c.contains(&p(1)));
+        assert_eq!(c.get(&p(1)), None);
+        assert_eq!(c.get(&p(0)), Some(&'a'));
+        assert_eq!(c.get(&p(2)), Some(&'c'));
     }
 
     #[test]
@@ -82,7 +72,9 @@ mod tests {
         let mut c = ThumbCache::new(2);
         c.insert(p(0), 'a');
         c.insert(p(0), 'b');
-        assert_eq!(c.len(), 1);
+        // If the update had added an entry, this insert would evict one.
+        c.insert(p(1), 'c');
         assert_eq!(c.get(&p(0)), Some(&'b'));
+        assert_eq!(c.get(&p(1)), Some(&'c'));
     }
 }

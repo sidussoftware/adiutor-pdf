@@ -132,8 +132,8 @@ impl Workspace {
         self.anchor = None;
     }
 
-    pub fn clear_selection(&mut self) {
-        self.selected.clear();
+    pub fn has_selection(&self) -> bool {
+        !self.selected.is_empty()
     }
 
     /// Selected grid positions, ascending.
@@ -171,6 +171,9 @@ impl Workspace {
     }
 
     pub fn delete_selected(&mut self) {
+        if self.selected.is_empty() {
+            return;
+        }
         let sel = std::mem::take(&mut self.selected);
         self.slots.retain(|s| !sel.contains(&s.id));
         self.anchor = None;
@@ -231,10 +234,6 @@ fn fs_key(s: &str, fold_case: bool) -> String {
 
 /// File names for Split, one per group (0-based positions), unique among
 /// themselves and against `existing`. Clashes get " (2)", " (3)", ... before ".pdf".
-pub fn split_names(stem: &str, groups: &[Vec<usize>], existing: &HashSet<String>) -> Vec<String> {
-    split_names_with(stem, groups, existing, FOLD_CASE)
-}
-
 fn split_names_with(
     stem: &str,
     groups: &[Vec<usize>],
@@ -266,7 +265,7 @@ fn split_names_with(
         .collect()
 }
 
-/// `split_names`, also bumping every name for which `taken` reports an existing file: catches
+/// Split file names (see `split_names_with`), also bumping every name for which `taken` reports an existing file: catches
 /// clashes the name comparison misses (case-insensitive or normalizing file systems, new files).
 pub fn free_split_names(
     stem: &str,
@@ -276,7 +275,7 @@ pub fn free_split_names(
 ) -> Vec<String> {
     let mut existing = existing.clone();
     loop {
-        let names = split_names(stem, groups, &existing);
+        let names = split_names_with(stem, groups, &existing, FOLD_CASE);
         // Clashes are never in `existing`, so it grows each round and the loop ends.
         let clashes: Vec<String> = names.iter().filter(|n| taken(n)).cloned().collect();
         if clashes.is_empty() {
@@ -357,6 +356,15 @@ mod tests {
     }
 
     #[test]
+    fn delete_without_selection_is_not_dirty() {
+        let mut ws = ws_with(&[3]);
+        ws.mark_saved();
+        ws.delete_selected();
+        assert!(!ws.is_dirty());
+        assert!(!ws.has_selection());
+    }
+
+    #[test]
     fn shift_click_selects_range() {
         let mut ws = ws_with(&[3, 2]);
         ws.select_only(1);
@@ -401,14 +409,14 @@ mod tests {
 
     #[test]
     fn split_names_basic() {
-        let names = split_names("doc", &[vec![0], vec![1, 2, 3]], &HashSet::new());
+        let names = split_names_with("doc", &[vec![0], vec![1, 2, 3]], &HashSet::new(), FOLD_CASE);
         assert_eq!(names, ["doc_p1.pdf", "doc_p2-4.pdf"]);
     }
 
     #[test]
     fn split_names_are_unique_and_never_clash() {
         let existing = HashSet::from(["doc_p1.pdf".to_string()]);
-        let names = split_names("doc", &[vec![0], vec![0]], &existing);
+        let names = split_names_with("doc", &[vec![0], vec![0]], &existing, FOLD_CASE);
         assert_eq!(names, ["doc_p1 (2).pdf", "doc_p1 (3).pdf"]);
     }
 
