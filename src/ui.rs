@@ -66,7 +66,8 @@ fn range_error_text(tr: &Tr, e: &RangeError) -> String {
 }
 
 /// Modal with a title, a text, a confirm button and Cancel (keys are i18n keys).
-/// Returns Some(true) on confirm, Some(false) on Cancel, None while unanswered.
+/// Returns Some(true) on confirm, Some(false) on Cancel, Esc or a click outside, None while
+/// unanswered.
 fn confirm_modal(
     ctx: &egui::Context,
     tr: &Tr,
@@ -76,7 +77,7 @@ fn confirm_modal(
     confirm_key: &str,
 ) -> Option<bool> {
     let mut answer = None;
-    egui::Modal::new(egui::Id::NULL.with(id)).show(ctx, |ui| {
+    let modal = egui::Modal::new(egui::Id::NULL.with(id)).show(ctx, |ui| {
         ui.heading(tr.t(title_key));
         ui.label(body);
         ui.horizontal(|ui| {
@@ -88,7 +89,7 @@ fn confirm_modal(
             }
         });
     });
-    answer
+    answer.or_else(|| modal.should_close().then_some(false))
 }
 
 fn file_name(path: &Path) -> String {
@@ -585,7 +586,7 @@ impl AdiutorApp {
             return;
         };
         let (mut ok, mut cancel) = (false, false);
-        egui::Modal::new(egui::Id::NULL.with("password")).show(ctx, |ui| {
+        let modal = egui::Modal::new(egui::Id::NULL.with("password")).show(ctx, |ui| {
             ui.heading(self.tr.t("password.title"));
             ui.label(
                 self.tr
@@ -602,6 +603,7 @@ impl AdiutorApp {
                 cancel = ui.button(self.tr.t("common.cancel")).clicked();
             });
         });
+        cancel |= !ok && modal.should_close();
         if ok || cancel {
             self.passwords.pop_front();
             let password = std::mem::take(&mut self.password_text);
@@ -713,5 +715,69 @@ impl eframe::App for AdiutorApp {
         self.password_modal(&ctx);
         self.overwrite_modal(&ctx);
         self.close_modal(&ctx);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use egui_kittest::Harness;
+    use egui_kittest::kittest::Queryable;
+
+    /// Shows the overwrite modal in a harness; the state keeps its first answer.
+    fn overwrite_harness() -> Harness<'static, Option<bool>> {
+        let tr = Tr::new(Lang::En);
+        let mut harness = Harness::new_ui_state(
+            move |ui, answer: &mut Option<bool>| {
+                let a = confirm_modal(
+                    ui.ctx(),
+                    &tr,
+                    "overwrite",
+                    "save.overwrite_title",
+                    "out.pdf already exists. Replace it?",
+                    "save.overwrite_confirm",
+                );
+                *answer = answer.or(a);
+            },
+            None,
+        );
+        harness.run();
+        assert_eq!(*harness.state(), None, "no answer before input");
+        harness
+    }
+
+    #[test]
+    fn overwrite_modal_replace() {
+        let mut harness = overwrite_harness();
+        harness.get_by_label("Replace").click();
+        harness.run();
+        assert_eq!(*harness.state(), Some(true));
+    }
+
+    #[test]
+    fn overwrite_modal_cancel() {
+        let mut harness = overwrite_harness();
+        harness.get_by_label("Cancel").click();
+        harness.run();
+        assert_eq!(*harness.state(), Some(false));
+    }
+
+    #[test]
+    fn overwrite_modal_click_outside_cancels() {
+        let mut harness = overwrite_harness();
+        let corner = egui::pos2(2.0, 2.0);
+        harness.hover_at(corner);
+        harness.drag_at(corner);
+        harness.drop_at(corner);
+        harness.run();
+        assert_eq!(*harness.state(), Some(false));
+    }
+
+    #[test]
+    fn overwrite_modal_escape_cancels() {
+        let mut harness = overwrite_harness();
+        harness.key_press(egui::Key::Escape);
+        harness.run();
+        assert_eq!(*harness.state(), Some(false));
     }
 }

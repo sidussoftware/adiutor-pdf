@@ -17,6 +17,7 @@ sys-locale = "0.3"
 winit = { version = "0.30.13", default-features = false }
 
 [dev-dependencies]
+egui_kittest = "0.37"
 tempfile = "3"
 
 [profile.release]
