@@ -1,0 +1,32 @@
+# cargo-about config (CI and release): `cargo about generate --fail about.hbs` fails on any license not
+# accepted here. Only permissive licenses; never add a copyleft one (GPL, LGPL, AGPL, MPL, ...).
+# Apache-2.0 comes first so dual-licensed crates that ship no license file still get a complete license text
+# (the fallback MIT text has no copyright line). No shipped crate has a NOTICE file.
+accepted = ["Apache-2.0", "MIT", "ISC", "Zlib", "Unicode-3.0"]
+# The release targets.
+targets = [
+    "x86_64-pc-windows-msvc",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+    "x86_64-unknown-linux-gnu",
+]
+ignore-build-dependencies = true
+ignore-dev-dependencies = true
+
+# egui's embedded default fonts; their files are also shipped in licenses/fonts/.
+[epaint_default_fonts]
+accepted = ["OFL-1.1", "Ubuntu-font-1.0"]
+
+# The libm-derived MIT notice is not detected automatically.
+[dpi.clarify]
+license = "Apache-2.0 AND MIT"
+
+[[dpi.clarify.files]]
+path = "LICENSE"
+license = "Apache-2.0"
+checksum = "6dc0e068dcf3a5bc8e054205b85b7720e1d49265bbc64bf515d2cf79197df69a"
+
+[[dpi.clarify.files]]
+path = "LICENSE-LIBM-MIT"
+license = "MIT"
+checksum = "9eff396a99bafd208e7126602420d6864f6066c08b84485a5b032320a9c01997"

@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Third-party licenses</title>
+<style>
+  body { font-family: sans-serif; max-width: 900px; margin: 0 auto; padding: 0 16px; }
+  pre { white-space: pre-wrap; background: #f4f4f4; padding: 8px; }
+</style>
+</head>
+<body>
+<h1>Third-party licenses</h1>
+<p>{{#each crates}}{{#if (eq package.name "adiutor-pdf")}}adiutor-pdf {{package.version}}{{/if}}{{/each}}:
+licenses of the Rust crates compiled into the program.</p>
+<h2>Overview</h2>
+<ul>
+{{#each overview}}
+  <li><a href="#{{id}}">{{name}}</a> ({{count}})</li>
+{{/each}}
+</ul>
+{{#each licenses}}
+{{#if first_of_kind}}<h2 id="{{id}}">{{name}}</h2>{{/if}}
+<h3>Used by</h3>
+<ul>
+{{#each used_by}}
+  <li>{{crate.name}} {{crate.version}}</li>
+{{/each}}
+</ul>
+<pre>{{text}}</pre>
+{{/each}}
+</body>
+</html>

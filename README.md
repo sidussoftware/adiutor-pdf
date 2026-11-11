@@ -76,7 +76,18 @@ executable, in `../Frameworks` (macOS app bundle), then in the system library pa
    release or tag does not exist yet).
 3. Review the draft on the Releases page, then **Publish**. Publishing creates the tag.
 
-## License
+## Licenses
 
-Dual-licensed under either of [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE), at your option. Release
-packages also include PDFium and its third-party licenses in `licenses/pdfium/`.
+adiutor-pdf is dual-licensed under either of [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE), at your option.
+
+Release packages include the licenses of the third-party software they contain, in the `licenses/` folder:
+
+- Rust crates compiled into the program: `licenses/THIRD-PARTY-LICENSES.html`. The Rust standard library is
+  dual-licensed under MIT or Apache-2.0.
+- PDFium and the libraries bundled with it: `licenses/pdfium/`.
+- Fonts embedded by egui: `licenses/fonts/` — Ubuntu Light (Ubuntu Font Licence 1.0), Hack (MIT and Bitstream
+  Vera License), Noto Emoji (SIL Open Font License 1.1) and emoji-icon-font (MIT).
+
+This software is based in part on the work of the Independent JPEG Group.
+
+Portions of this software are copyright © 2026 The FreeType Project (www.freetype.org). All rights reserved.
