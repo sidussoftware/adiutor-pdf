@@ -81,6 +81,32 @@ fn range_error_text(tr: &Tr, e: &RangeError) -> String {
     }
 }
 
+/// Modal with a title, a text, a confirm button and Cancel (keys are i18n keys).
+/// Returns Some(true) on confirm, Some(false) on Cancel, None while unanswered.
+fn confirm_modal(
+    ctx: &egui::Context,
+    tr: &Tr,
+    id: &str,
+    title_key: &str,
+    body: &str,
+    confirm_key: &str,
+) -> Option<bool> {
+    let mut answer = None;
+    egui::Modal::new(egui::Id::NULL.with(id)).show(ctx, |ui| {
+        ui.heading(tr.t(title_key));
+        ui.label(body);
+        ui.horizontal(|ui| {
+            if ui.button(tr.t(confirm_key)).clicked() {
+                answer = Some(true);
+            }
+            if ui.button(tr.t("common.cancel")).clicked() {
+                answer = Some(false);
+            }
+        });
+    });
+    answer
+}
+
 fn file_name(path: &Path) -> String {
     path.file_name()
         .map_or_else(String::new, |n| n.to_string_lossy().into_owned())
@@ -386,7 +412,7 @@ impl AdiutorApp {
             }
             let idle = self.batch.is_none();
             let any = !self.workspace.is_empty();
-            let sel = !self.workspace.selected_positions().is_empty();
+            let sel = self.workspace.has_selection();
             let enabled = |on: bool| idle && on;
             let btn = |ui: &mut egui::Ui, on: bool, text: &str| {
                 ui.add_enabled(enabled(on), egui::Button::new(text))
@@ -434,6 +460,7 @@ impl AdiutorApp {
         let mut action: Option<GridAction> = None;
         let mut marker: Option<(f32, f32, f32)> = None; // x, top, bottom
         let dragging = egui::DragAndDrop::has_payload_of_type::<usize>(ui.ctx());
+        let mods = ui.input(|i| i.modifiers);
         egui::ScrollArea::vertical()
             .auto_shrink(false)
             .show(ui, |ui| {
@@ -451,7 +478,6 @@ impl AdiutorApp {
                             Sense::click_and_drag(),
                         );
                         resp.dnd_set_drag_payload(pos);
-                        let mods = ui.input(|i| i.modifiers);
                         if resp.drag_started() && !self.workspace.is_selected(pos) {
                             action = Some(Box::new(move |w| w.select_only(pos)));
                         } else if resp.clicked() {
@@ -617,19 +643,22 @@ impl AdiutorApp {
         let body = self
             .tr
             .tf("save.overwrite_body", &[("file", &file_name(dest))]);
-        let (mut replace, mut cancel) = (false, false);
-        egui::Modal::new(egui::Id::NULL.with("overwrite")).show(ctx, |ui| {
-            ui.heading(self.tr.t("save.overwrite_title"));
-            ui.label(body);
-            ui.horizontal(|ui| {
-                replace = ui.button(self.tr.t("save.overwrite_confirm")).clicked();
-                cancel = ui.button(self.tr.t("common.cancel")).clicked();
-            });
-        });
-        if replace && let Some((pages, dest)) = self.pending_overwrite.take() {
-            self.start_batch(vec![(pages, dest)], None);
-        } else if cancel {
-            self.pending_overwrite = None;
+        let answer = confirm_modal(
+            ctx,
+            &self.tr,
+            "overwrite",
+            "save.overwrite_title",
+            &body,
+            "save.overwrite_confirm",
+        );
+        match answer {
+            Some(true) => {
+                if let Some(job) = self.pending_overwrite.take() {
+                    self.start_batch(vec![job], None);
+                }
+            }
+            Some(false) => self.pending_overwrite = None,
+            None => {}
         }
     }
 
@@ -637,19 +666,22 @@ impl AdiutorApp {
         if !self.close_prompt {
             return;
         }
-        egui::Modal::new(egui::Id::NULL.with("close")).show(ctx, |ui| {
-            ui.heading(self.tr.t("close.unsaved_title"));
-            ui.label(self.tr.t("close.unsaved_body"));
-            ui.horizontal(|ui| {
-                if ui.button(self.tr.t("close.confirm")).clicked() {
-                    self.closing = true;
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-                }
-                if ui.button(self.tr.t("common.cancel")).clicked() {
-                    self.close_prompt = false;
-                }
-            });
-        });
+        let answer = confirm_modal(
+            ctx,
+            &self.tr,
+            "close",
+            "close.unsaved_title",
+            self.tr.t("close.unsaved_body"),
+            "close.confirm",
+        );
+        match answer {
+            Some(true) => {
+                self.closing = true;
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+            Some(false) => self.close_prompt = false,
+            None => {}
+        }
     }
 }
 
