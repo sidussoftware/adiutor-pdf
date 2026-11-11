@@ -27,7 +27,7 @@ The AppImage bundles PDFium only. The system must provide:
 - OpenGL 2 or newer
 - `libxkbcommon-x11` (X11 sessions)
 - an XDG desktop portal for the file dialogs, for example `xdg-desktop-portal-gtk`; without one, `zenity` is
-  used instead (also needed for the "replace file?" question)
+  used instead
 
 ### macOS notes
 
