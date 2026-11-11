@@ -45,7 +45,8 @@ The AppImage bundles PDFium only. The system must provide:
    numbers in **Pages** and press Enter or **Select**.
 3. Drag selected pages to reorder them; press Delete or Backspace to remove them.
 4. **Save all as one PDF** writes the grid in its current order. **Save selection** writes only the selected pages.
-   **Split** writes one file per page-number group (see below) into a folder you choose.
+   **Split** writes one file per page-number group (see below) into a folder you choose. Closing the window with
+   **Close anyway** during a split keeps the files already written (each one complete) and stops the rest.
 
 ### Page numbers
 
