@@ -14,7 +14,16 @@ Tick an item only after doing it on a real build. Tasks 7 and 8 add their checks
 - [ ] Mixed page sizes (portrait and landscape) keep their aspect ratio
 
 ## Selection
+- [x] Click selects one page; Ctrl+click toggles; Shift+click selects the range from the anchor (Xvfb, xdotool, screenshots)
+- [x] Selected pages show a thick frame plus a check badge (not color alone)
+- [x] Type `11-12` with two 10-page files and press Enter: the first two pages of the second file are selected (Xvfb; confirmed by Backspace removing B1 and B2)
+- [x] Type `3-1`: field gets a red frame and "Invalid range: 3 is greater than 1" appears; editing the text clears it
+- [ ] Italian messages for the range errors with `LANG=it_IT.UTF-8`
+
 ## Reorder/Delete
+- [x] Select pages 2 and 4, drag them to the start: they land first in original order; insertion marker shown while dragging (Xvfb)
+- [x] Delete removes the selected pages; Backspace inside the Pages field edits text and deletes no page
+- [ ] Drag to the end of the list and between rows; drag an unselected page (it becomes the selection first)
 ## Save
 ## Split
 ## Password
