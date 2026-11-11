@@ -57,6 +57,16 @@ jobs:
           mkdir -p "$pkg/licenses/pdfium"
           cp target/release/adiutor-pdf.exe pdfium/bin/pdfium.dll LICENSE-MIT LICENSE-APACHE "$pkg/"
           cp pdfium/LICENSE pdfium/licenses/* "$pkg/licenses/pdfium/"
+      # Puts dumpbin on PATH.
+      - uses: ilammy/msvc-dev-cmd@v1
+      - name: Check the exe needs no VC++ runtime
+        shell: pwsh
+        run: |
+          # .cargo/config.toml links the CRT statically; fail if the exe still imports it.
+          $deps = dumpbin /dependents target\release\adiutor-pdf.exe
+          if ($LASTEXITCODE -ne 0) { throw "dumpbin failed" }
+          $deps
+          if ($deps -match 'VCRUNTIME|MSVCP') { throw "adiutor-pdf.exe depends on the VC++ runtime" }
       - name: Zip
         shell: pwsh
         run: Compress-Archive -Path "adiutor-pdf-v$env:VERSION-windows-x64\*" -DestinationPath "adiutor-pdf-v$env:VERSION-windows-x64.zip"

@@ -26,14 +26,15 @@ The AppImage bundles PDFium only. The system must provide:
 
 - OpenGL 2 or newer
 - `libxkbcommon-x11` (X11 sessions)
-- an XDG desktop portal for the file dialogs, for example `xdg-desktop-portal-gtk`
+- an XDG desktop portal for the file dialogs, for example `xdg-desktop-portal-gtk`; without one, `zenity` is
+  used instead (also needed for the "replace file?" question)
 
 ## Usage
 
 1. **Add PDF** (or drop files on the window, or pass them as arguments). All pages appear in one grid, numbered
    from 1. Password-protected files ask for the password.
-2. Click a page to select it; Ctrl+click toggles; Shift+click selects a range. Or type page numbers in **Pages**
-   and press Enter or **Select**.
+2. Click a page to select it; Ctrl+click (Cmd+click on macOS) toggles; Shift+click selects a range. Or type page
+   numbers in **Pages** and press Enter or **Select**.
 3. Drag selected pages to reorder them; press Delete or Backspace to remove them.
 4. **Save all as one PDF** writes the grid in its current order. **Save selection** writes only the selected pages.
    **Split** writes one file per page-number group (see below) into a folder you choose.
@@ -46,7 +47,7 @@ file per page.
 
 ## Build from source
 
-Needs Rust 1.95+. On Linux also `libgtk-3-dev libxkbcommon-dev libwayland-dev`. PDFium is loaded at runtime;
+Needs Rust 1.95+. On Linux also `libxkbcommon-dev libwayland-dev`. PDFium is loaded at runtime;
 fetch a prebuilt copy (platform: `linux-x64`, `win-x64`, `mac-x64`, `mac-arm64`):
 
 ```sh
