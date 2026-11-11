@@ -4,7 +4,7 @@ use pdfium_render::prelude::{Pdfium, PdfiumError};
 use std::path::PathBuf;
 
 /// Search order: $ADIUTOR_PDFIUM_DIR, exe dir, exe_dir/../Frameworks (macOS bundle),
-/// exe_dir/../lib (AppImage), then the system library.
+/// then the system library.
 pub fn bind() -> Result<Pdfium, String> {
     let mut dirs: Vec<PathBuf> = Vec::new();
     if let Some(dir) = std::env::var_os("ADIUTOR_PDFIUM_DIR") {
@@ -14,11 +14,7 @@ pub fn bind() -> Result<Pdfium, String> {
         .ok()
         .and_then(|exe| exe.parent().map(PathBuf::from))
     {
-        dirs.extend([
-            exe_dir.clone(),
-            exe_dir.join("../Frameworks"),
-            exe_dir.join("../lib"),
-        ]);
+        dirs.extend([exe_dir.clone(), exe_dir.join("../Frameworks")]);
     }
 
     let mut tried = Vec::new();

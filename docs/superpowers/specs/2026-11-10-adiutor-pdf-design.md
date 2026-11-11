@@ -217,7 +217,9 @@ On every push and pull request, on Windows, macOS and Linux:
   - Windows x86-64: `.zip` with the `.exe` and `pdfium.dll`.
   - macOS **universal** (x86-64 + Apple Silicon): `.zip` with the `.app` bundle containing the universal PDFium
     library.
-  - Linux x86-64: AppImage, built on the oldest available Ubuntu runner for broad glibc compatibility.
+  - Linux x86-64: `.tar.gz` with one folder holding the executable and `libpdfium.so`, built on the oldest
+    available Ubuntu runner for broad glibc compatibility.
+    Changed in v0.1.2: Linux ships as .tar.gz (the AppImage runtime embeds LGPL libfuse).
 - Builds are unsigned. The README explains how to get past the Windows SmartScreen and macOS Gatekeeper warnings.
 
 ## 10. Repository layout

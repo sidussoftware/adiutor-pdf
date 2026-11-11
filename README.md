@@ -11,18 +11,19 @@ Get the package for your system from the [Releases](../../releases) page:
 |---------|-----------------------------------------|
 | Windows | `adiutor-pdf-vX.Y.Z-windows-x64.zip`    |
 | macOS   | `adiutor-pdf-vX.Y.Z-macos-universal.zip` (Intel and Apple Silicon) |
-| Linux   | `adiutor-pdf-vX.Y.Z-linux-x86_64.AppImage` |
+| Linux   | `adiutor-pdf-vX.Y.Z-linux-x86_64.tar.gz` |
 
 ### First launch (builds are not code-signed)
 
 - **Windows:** unzip, run `adiutor-pdf.exe`. If SmartScreen appears: **More info -> Run anyway**.
 - **macOS:** unzip, then right-click `adiutor-pdf.app` -> **Open** -> Open. Or: System Settings -> Privacy &
   Security -> **Open Anyway**.
-- **Linux:** `chmod +x adiutor-pdf-*.AppImage`, then run it.
+- **Linux:** extract the archive (`tar -xzf adiutor-pdf-*.tar.gz`), then run `./adiutor-pdf` in the extracted
+  folder.
 
 ### Linux requirements
 
-The AppImage bundles PDFium only. The system must provide:
+The archive bundles PDFium only. The system must provide:
 
 - OpenGL 2 or newer
 - `libxkbcommon-x11` (X11 sessions)
@@ -66,7 +67,7 @@ cargo run --release
 ```
 
 `ADIUTOR_PDFIUM_DIR` names the folder holding the PDFium library. Without it the app looks next to the
-executable, in `../Frameworks` and `../lib`, then in the system library path.
+executable, in `../Frameworks` (macOS app bundle), then in the system library path.
 
 ## Making a release
 
