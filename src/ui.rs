@@ -440,7 +440,8 @@ impl AdiutorApp {
         }
         let mut visible: Vec<PageRef> = Vec::new();
         let mut action: Option<GridAction> = None;
-        let mut marker: Option<(f32, f32, f32)> = None; // x, top, bottom
+        // Cell rects by grid position, collected while dragging to find the drop target.
+        let mut cells: Vec<egui::Rect> = Vec::new();
         let dragging = egui::DragAndDrop::has_payload_of_type::<usize>(ui.ctx());
         let mods = ui.input(|i| i.modifiers);
         egui::ScrollArea::vertical()
@@ -473,20 +474,8 @@ impl AdiutorApp {
                                 }
                             }));
                         }
-                        if dragging && resp.contains_pointer() {
-                            let after = ui
-                                .input(|i| i.pointer.interact_pos())
-                                .is_some_and(|p| p.x >= rect.center().x);
-                            let target = pos + usize::from(after);
-                            let x = if after { rect.right() } else { rect.left() };
-                            marker = Some((
-                                x + if after { GAP / 2.0 } else { -GAP / 2.0 },
-                                rect.top(),
-                                rect.bottom(),
-                            ));
-                            if resp.dnd_release_payload::<usize>().is_some() {
-                                action = Some(Box::new(move |w| w.move_selected_to(target)));
-                            }
+                        if dragging {
+                            cells.push(rect);
                         }
                         if !ui.is_rect_visible(rect) {
                             continue;
@@ -495,9 +484,13 @@ impl AdiutorApp {
                             egui::Rect::from_min_size(rect.min, vec2(THUMB_WIDTH, thumb_h));
                         match self.cache.get(&slot.page) {
                             Some(tex) => {
+                                // Letterbox: the rendered bitmap can differ from the clamped cell.
+                                let size = tex.size_vec2();
+                                let scale =
+                                    (img_rect.width() / size.x).min(img_rect.height() / size.y);
                                 ui.painter().image(
                                     tex.id(),
-                                    img_rect,
+                                    egui::Rect::from_center_size(img_rect.center(), size * scale),
                                     egui::Rect::from_min_max(
                                         egui::pos2(0.0, 0.0),
                                         egui::pos2(1.0, 1.0),
@@ -540,11 +533,38 @@ impl AdiutorApp {
                         }
                     }
                 });
-                if let Some((x, top, bottom)) = marker {
+                // Over a cell or a gap of the grid, the drop goes next to the nearest cell.
+                let clip = ui.clip_rect();
+                let pointer = ui.input(|i| i.pointer.interact_pos());
+                let nearest = pointer
+                    .filter(|_| ui.rect_contains_pointer(clip))
+                    .and_then(|p| {
+                        let dist = |r: &egui::Rect| r.distance_sq_to_pos(p);
+                        let cell = cells
+                            .iter()
+                            .enumerate()
+                            .min_by(|(_, a), (_, b)| dist(a).total_cmp(&dist(b)))?;
+                        Some((p, cell))
+                    });
+                if let Some((p, (pos, rect))) = nearest {
+                    let after = p.x >= rect.center().x;
+                    let target = pos + usize::from(after);
+                    let x = if after {
+                        rect.right() + GAP / 2.0
+                    } else {
+                        rect.left() - GAP / 2.0
+                    };
+                    // Keep the 3 pt line inside the clip, e.g. before a row's first cell.
+                    let x = x.clamp(clip.left() + 1.5, clip.right() - 1.5);
                     ui.painter().line_segment(
-                        [egui::pos2(x, top), egui::pos2(x, bottom)],
+                        [egui::pos2(x, rect.top()), egui::pos2(x, rect.bottom())],
                         egui::Stroke::new(3.0, ui.visuals().selection.bg_fill),
                     );
+                    if ui.input(|i| i.pointer.any_released())
+                        && egui::DragAndDrop::take_payload::<usize>(ui.ctx()).is_some()
+                    {
+                        action = Some(Box::new(move |w| w.move_selected_to(target)));
+                    }
                 }
             });
         if let Some(f) = action {
