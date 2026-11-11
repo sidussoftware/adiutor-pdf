@@ -1,0 +1,151 @@
+name: Release
+
+# Creates a DRAFT release for the version in Cargo.toml. The owner publishes it
+# (which creates the tag). Nothing happens if the release or tag already exists.
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  check:
+    runs-on: ubuntu-22.04
+    outputs:
+      create: ${{ steps.v.outputs.create }}
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')
+          create=false
+          if ! gh release view "v$version" >/dev/null 2>&1 \
+            && [ -z "$(git ls-remote --tags origin "v$version")" ]; then
+            create=true
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "create=$create" >> "$GITHUB_OUTPUT"
+
+  windows:
+    needs: check
+    if: needs.check.outputs.create == 'true'
+    runs-on: windows-latest
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build
+        shell: bash
+        run: |
+          cargo build --release
+          bash scripts/fetch-pdfium.sh win-x64 pdfium
+          pkg="adiutor-pdf-v$VERSION-windows-x64"
+          mkdir -p "$pkg/licenses/pdfium"
+          cp target/release/adiutor-pdf.exe pdfium/bin/pdfium.dll LICENSE-MIT LICENSE-APACHE "$pkg/"
+          cp pdfium/LICENSE pdfium/licenses/* "$pkg/licenses/pdfium/"
+      - name: Zip
+        shell: pwsh
+        run: Compress-Archive -Path "adiutor-pdf-v$env:VERSION-windows-x64\*" -DestinationPath "adiutor-pdf-v$env:VERSION-windows-x64.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: adiutor-pdf-v${{ needs.check.outputs.version }}-windows-x64.zip
+
+  macos:
+    needs: check
+    if: needs.check.outputs.create == 'true'
+    runs-on: macos-latest
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-apple-darwin,aarch64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+      - name: Build universal app
+        run: |
+          cargo build --release --target x86_64-apple-darwin
+          cargo build --release --target aarch64-apple-darwin
+          bash scripts/fetch-pdfium.sh mac-x64 pdfium-x64
+          bash scripts/fetch-pdfium.sh mac-arm64 pdfium-arm64
+          app=adiutor-pdf.app/Contents
+          mkdir -p "$app/MacOS" "$app/Frameworks" licenses/pdfium
+          lipo -create -output "$app/MacOS/adiutor-pdf" \
+            target/x86_64-apple-darwin/release/adiutor-pdf target/aarch64-apple-darwin/release/adiutor-pdf
+          lipo -create -output "$app/Frameworks/libpdfium.dylib" \
+            pdfium-x64/lib/libpdfium.dylib pdfium-arm64/lib/libpdfium.dylib
+          lipo -info "$app/MacOS/adiutor-pdf" "$app/Frameworks/libpdfium.dylib" | tee lipo.txt
+          [ "$(grep -c 'x86_64 arm64' lipo.txt)" = 2 ]
+          cp packaging/macos/Info.plist "$app/Info.plist"
+          plutil -replace CFBundleShortVersionString -string "$VERSION" "$app/Info.plist"
+          cp pdfium-arm64/LICENSE pdfium-arm64/licenses/* licenses/pdfium/
+          # Ad-hoc signature so Apple Silicon allows launching the app.
+          codesign --force --deep -s - adiutor-pdf.app
+          pkg="adiutor-pdf-v$VERSION-macos-universal"
+          mkdir "$pkg"
+          cp -R adiutor-pdf.app licenses LICENSE-MIT LICENSE-APACHE "$pkg/"
+          ditto -c -k --keepParent "$pkg" "$pkg.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: adiutor-pdf-v${{ needs.check.outputs.version }}-macos-universal.zip
+
+  linux:
+    needs: check
+    if: needs.check.outputs.create == 'true'
+    runs-on: ubuntu-22.04
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+      # Upstream publishes no checksum; this is the sha256 of the 1.9.1 asset when pinned.
+      APPIMAGETOOL_URL: https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage
+      APPIMAGETOOL_SHA256: ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install Linux dev packages
+        run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libwayland-dev
+      - name: Build AppImage
+        run: |
+          cargo build --release
+          bash scripts/fetch-pdfium.sh linux-x64 pdfium
+          curl -fsSL -o appimagetool "$APPIMAGETOOL_URL"
+          echo "$APPIMAGETOOL_SHA256  appimagetool" | sha256sum -c -
+          chmod +x appimagetool
+          d=AppDir
+          mkdir -p $d/usr/bin $d/usr/lib $d/licenses/pdfium
+          cp target/release/adiutor-pdf $d/usr/bin/
+          cp pdfium/lib/libpdfium.so $d/usr/lib/
+          cp packaging/linux/adiutor-pdf.desktop packaging/linux/adiutor-pdf.png $d/
+          cp LICENSE-MIT LICENSE-APACHE $d/licenses/
+          cp pdfium/LICENSE pdfium/licenses/* $d/licenses/pdfium/
+          ln -s usr/bin/adiutor-pdf $d/AppRun
+          ARCH=x86_64 ./appimagetool --appimage-extract-and-run $d "adiutor-pdf-v$VERSION-linux-x86_64.AppImage"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: adiutor-pdf-v${{ needs.check.outputs.version }}-linux-x86_64.AppImage
+
+  release:
+    needs: [check, windows, macos, linux]
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.check.outputs.version }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release create "v$VERSION" --draft --target "$GITHUB_SHA" \
+            --title "adiutor-pdf v$VERSION" --generate-notes dist/*
