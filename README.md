@@ -29,6 +29,14 @@ The AppImage bundles PDFium only. The system must provide:
 - an XDG desktop portal for the file dialogs, for example `xdg-desktop-portal-gtk`; without one, `zenity` is
   used instead (also needed for the "replace file?" question)
 
+### macOS notes
+
+- Choosing Quit from the Dock, or logging out with the app open, closes it **without** the
+  unsaved-changes prompt (a limitation of winit 0.30, the windowing library). Cmd+Q and the window's close button
+  do show the prompt.
+- The default macOS app menu (Hide, About, ...) is intentionally turned off, so that Cmd+Q reaches the app and
+  goes through the unsaved-changes prompt.
+
 ## Usage
 
 1. **Add PDF** (or drop files on the window, or pass them as arguments). All pages appear in one grid, numbered
