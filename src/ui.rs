@@ -10,7 +10,8 @@ use std::collections::{HashSet, VecDeque};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
-const THUMB_CACHE_CAP: usize = 300;
+/// Bytes of thumbnail textures kept (RGBA, 4 bytes per pixel).
+const THUMB_CACHE_BYTES: usize = 48 << 20;
 /// Thumbnail width in points; the engine renders it at `THUMB_WIDTH * pixels_per_point`.
 const THUMB_WIDTH: f32 = 150.0;
 const LABEL_HEIGHT: f32 = 20.0;
@@ -26,6 +27,8 @@ pub struct AdiutorApp {
     cache: ThumbCache<TextureHandle>,
     /// Last set sent with `Command::Visible`, to avoid resending an unchanged set.
     last_visible: Vec<PageRef>,
+    /// Scale the cached thumbnails were rendered for.
+    pixels_per_point: f32,
     /// Dismissible messages at the bottom (failures, results).
     messages: Vec<String>,
     /// Contents of the Pages field and the parse error shown under it.
@@ -120,8 +123,9 @@ impl AdiutorApp {
             engine,
             workspace: Workspace::new(),
             tr,
-            cache: ThumbCache::new(THUMB_CACHE_CAP),
+            cache: ThumbCache::new(THUMB_CACHE_BYTES),
             last_visible: Vec::new(),
+            pixels_per_point: ctx.pixels_per_point(),
             messages: Vec::new(),
             pages_text: String::new(),
             pages_error: None,
@@ -203,7 +207,8 @@ impl AdiutorApp {
                     );
                     let name = format!("thumb-{}-{}", page.doc, page.index);
                     let tex = ctx.load_texture(name, image, TextureOptions::LINEAR);
-                    self.cache.insert(page, tex);
+                    let bytes = width as usize * height as usize * 4;
+                    self.cache.insert(page, tex, bytes);
                 }
                 Event::OpenFailed { path, reason } => {
                     let text = self.tr.tf(
@@ -456,6 +461,13 @@ impl AdiutorApp {
             ui.centered_and_justified(|ui| ui.label(self.tr.t("grid.empty_hint")));
             return;
         }
+        let ppp = ui.ctx().pixels_per_point();
+        if ppp != self.pixels_per_point {
+            // Re-render at the new scale so thumbnails stay sharp.
+            self.pixels_per_point = ppp;
+            self.cache.clear();
+            self.last_visible.clear();
+        }
         let mut visible: Vec<PageRef> = Vec::new();
         let mut action: Option<GridAction> = None;
         let mut marker: Option<(f32, f32, f32)> = None; // x, top, bottom
@@ -569,7 +581,7 @@ impl AdiutorApp {
             f(&mut self.workspace);
         }
         if visible != self.last_visible {
-            let width_px = (THUMB_WIDTH * ui.ctx().pixels_per_point()).round() as u32;
+            let width_px = (THUMB_WIDTH * ppp).round() as u32;
             self.last_visible = visible.clone();
             self.send(Command::Visible {
                 pages: visible,
