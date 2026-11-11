@@ -189,7 +189,7 @@ fn corrupted_file_fails() {
     std::fs::write(&path, b"not a pdf").unwrap();
     let event = open(&engine, &path, None);
     assert!(
-        matches!(&event, Event::OpenFailed { path: p, .. } if *p == path),
+        matches!(&event, Event::OpenFailed { path: p, reason } if *p == path && reason == "not a valid PDF or damaged"),
         "{event:?}"
     );
 }
@@ -220,15 +220,13 @@ fn encrypted_pdf_wrong_then_right_password() {
     }
 }
 
-#[test]
-fn failed_save_leaves_no_files() {
-    let _serial = serial();
+/// Saves page 0 of a fresh document to `dest` and asserts SaveFailed with no files left in `dir`
+/// except `keep`.
+fn assert_save_fails_cleanly(dir: &Path, dest: PathBuf, keep: &[&str]) {
     let Some(engine) = engine() else { return };
-    let dir = tempfile::tempdir().unwrap();
-    let a = dir.path().join("a.pdf");
+    let a = dir.join("a.pdf");
     make_pdf(&a, &[(100.0, 100.0)]);
     let a = open_ok(&engine, &a);
-    let dest = dir.path().join("missing_subdir/out.pdf");
     save(&engine, 2, vec![page(a, 0)], dest.clone());
     let event = wait_for(&engine, |e| {
         matches!(e, Event::Saved { .. } | Event::SaveFailed { .. })
@@ -237,11 +235,31 @@ fn failed_save_leaves_no_files() {
         matches!(&event, Event::SaveFailed { job: 2, dest: d, .. } if *d == dest),
         "{event:?}"
     );
-    for entry in std::fs::read_dir(dir.path()).unwrap() {
+    for entry in std::fs::read_dir(dir).unwrap() {
         let name = entry.unwrap().file_name().into_string().unwrap();
-        assert!(!name.contains("tmp"), "leftover temp file {name}");
-        assert_ne!(name, "out.pdf");
+        assert!(
+            name == "a.pdf" || keep.contains(&name.as_str()),
+            "leftover file {name}"
+        );
     }
+}
+
+#[test]
+fn failed_save_leaves_no_files() {
+    let _serial = serial();
+    let dir = tempfile::tempdir().unwrap();
+    let dest = dir.path().join("missing_subdir/out.pdf");
+    assert_save_fails_cleanly(dir.path(), dest, &[]);
+}
+
+#[test]
+fn failed_rename_removes_temp_file() {
+    let _serial = serial();
+    let dir = tempfile::tempdir().unwrap();
+    // The temp file is written next to `dest`; the rename onto a directory fails.
+    let dest = dir.path().join("out.pdf");
+    std::fs::create_dir(&dest).unwrap();
+    assert_save_fails_cleanly(dir.path(), dest, &["out.pdf"]);
 }
 
 #[test]
@@ -300,6 +318,29 @@ fn thumbnail_has_requested_width() {
             assert_eq!(p, page(doc, 0));
             assert_eq!((width, height), (150, 75));
             assert_eq!(rgba.len(), 150 * 75 * 4);
+        }
+        _ => unreachable!(),
+    }
+}
+
+#[test]
+fn tall_page_thumbnail_height_is_capped() {
+    let _serial = serial();
+    let Some(engine) = engine() else { return };
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("tall.pdf");
+    make_pdf(&path, &[(100.0, 10000.0)]);
+    let doc = open_ok(&engine, &path);
+    engine
+        .send(Command::Visible {
+            pages: vec![page(doc, 0)],
+            width_px: 150,
+        })
+        .unwrap_or_else(|_| panic!("engine died"));
+    match wait_for(&engine, |e| matches!(e, Event::Thumbnail { .. })) {
+        Event::Thumbnail { width, height, .. } => {
+            assert_eq!(height, 600, "height must be capped at 4 x width_px");
+            assert!(width <= 150);
         }
         _ => unreachable!(),
     }
