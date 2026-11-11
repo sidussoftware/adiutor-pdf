@@ -20,6 +20,14 @@ const GAP: f32 = 12.0;
 
 type GridAction = Box<dyn FnOnce(&mut Workspace)>;
 
+/// An i18n key and its placeholder values, translated when drawn so a language switch applies.
+type Message = (&'static str, Vec<(&'static str, String)>);
+
+fn message_text(tr: &Tr, (key, args): &Message) -> String {
+    let args: Vec<(&str, &str)> = args.iter().map(|(n, v)| (*n, v.as_str())).collect();
+    tr.tf(key, &args)
+}
+
 pub struct AdiutorApp {
     /// Err = why the engine could not start; shown instead of the grid.
     engine: Result<Engine, String>,
@@ -31,7 +39,7 @@ pub struct AdiutorApp {
     /// Scale the cached thumbnails were rendered for.
     pixels_per_point: f32,
     /// Dismissible messages at the bottom (failures, results).
-    messages: Vec<String>,
+    messages: Vec<Message>,
     /// Contents of the Pages field and the parse error shown under it.
     pages_text: String,
     pages_error: Option<RangeError>,
@@ -139,13 +147,14 @@ impl AdiutorApp {
         // No more events will come: unblock Save and Split.
         self.batch = None;
         if !std::mem::replace(&mut self.engine_dead, true) {
-            self.error(self.tr.t("error.internal").to_string());
+            self.error("error.internal", vec![]);
         }
     }
 
-    fn error(&mut self, text: String) {
-        eprintln!("{text}");
-        self.messages.push(text);
+    fn error(&mut self, key: &'static str, args: Vec<(&'static str, String)>) {
+        let message = (key, args);
+        eprintln!("{}", message_text(&self.tr, &message));
+        self.messages.push(message);
     }
 
     fn open(&mut self, path: PathBuf) {
@@ -194,11 +203,10 @@ impl AdiutorApp {
                     self.cache.insert(page, tex, bytes);
                 }
                 Event::OpenFailed { path, reason } => {
-                    let text = self.tr.tf(
+                    self.error(
                         "open.failed",
-                        &[("file", &file_name(&path)), ("reason", &reason)],
+                        vec![("file", file_name(&path)), ("reason", reason)],
                     );
-                    self.error(text);
                 }
                 Event::PasswordRequired { path, wrong } => self.passwords.push_back((path, wrong)),
                 Event::SaveProgress { job, done, .. } => {
@@ -208,17 +216,16 @@ impl AdiutorApp {
                 }
                 Event::Saved { job, dest } => {
                     if self.batch.as_ref().is_some_and(|b| !b.is_split()) {
-                        let text = self.tr.tf("save.done", &[("file", &file_name(&dest))]);
-                        self.messages.push(text);
+                        self.messages
+                            .push(("save.done", vec![("file", file_name(&dest))]));
                     }
                     self.finish_job(job, true);
                 }
                 Event::SaveFailed { job, dest, reason } => {
-                    let text = self.tr.tf(
+                    self.error(
                         "save.failed",
-                        &[("file", &file_name(&dest)), ("reason", &reason)],
+                        vec![("file", file_name(&dest)), ("reason", reason)],
                     );
-                    self.error(text);
                     self.finish_job(job, false);
                 }
             }
@@ -236,14 +243,14 @@ impl AdiutorApp {
         };
         self.batch = None;
         if let Some((count, folder)) = outcome.split_done {
-            let text = self.tr.tf(
-                "split.done",
-                &[
-                    ("count", &count.to_string()),
-                    ("folder", &folder.to_string_lossy()),
-                ],
-            );
-            self.messages.push(text);
+            let key = if count == 1 {
+                "split.done_one"
+            } else {
+                "split.done"
+            };
+            let folder = folder.to_string_lossy().into_owned();
+            self.messages
+                .push((key, vec![("count", count.to_string()), ("folder", folder)]));
         }
         if outcome.mark_saved {
             self.workspace.mark_saved();
@@ -253,8 +260,7 @@ impl AdiutorApp {
     /// Sends one `Save` per (pages, dest) and starts tracking them as a batch.
     fn start_batch(&mut self, jobs: Vec<(Vec<PageRef>, PathBuf)>, split_folder: Option<PathBuf>) {
         if jobs.iter().any(|(_, d)| self.workspace.is_source_path(d)) {
-            let text = self.tr.t("save.blocked_original").to_string();
-            self.messages.push(text);
+            self.messages.push(("save.blocked_original", vec![]));
             return;
         }
         let all = self.workspace.all_pages();
@@ -324,14 +330,11 @@ impl AdiutorApp {
                 .filter_map(|e| e.file_name().into_string().ok())
                 .collect(),
             Err(e) => {
-                let text = self.tr.tf(
+                let file = folder.to_string_lossy().into_owned();
+                self.error(
                     "save.failed",
-                    &[
-                        ("file", &folder.to_string_lossy()),
-                        ("reason", &e.to_string()),
-                    ],
+                    vec![("file", file), ("reason", e.to_string())],
                 );
-                self.error(text);
                 return;
             }
         };
@@ -573,7 +576,7 @@ impl AdiutorApp {
                 if ui.button(self.tr.t("common.close")).clicked() {
                     dismiss = Some(i);
                 }
-                ui.label(message);
+                ui.label(message_text(&self.tr, message));
             });
         }
         if let Some(i) = dismiss {
@@ -723,6 +726,13 @@ mod tests {
     use super::*;
     use egui_kittest::Harness;
     use egui_kittest::kittest::Queryable;
+
+    #[test]
+    fn messages_are_translated_when_drawn() {
+        let m: Message = ("save.done", vec![("file", "a.pdf".into())]);
+        assert_eq!(message_text(&Tr::new(Lang::En), &m), "Saved a.pdf");
+        assert_eq!(message_text(&Tr::new(Lang::It), &m), "Salvato a.pdf");
+    }
 
     /// Shows the overwrite modal in a harness; the state keeps its first answer.
     fn overwrite_harness() -> Harness<'static, Option<bool>> {

@@ -27,6 +27,7 @@ save.overwrite_confirm = Sostituisci
 save.done = Salvato {file}
 save.progress = Salvataggio... {done} di {total}
 split.done = Creati {count} file in {folder}
+split.done_one = Creato 1 file in {folder}
 close.unsaved_title = Modifiche non salvate
 close.unsaved_body = Ci sono modifiche non salvate. Chiudere comunque?
 close.confirm = Chiudi comunque
