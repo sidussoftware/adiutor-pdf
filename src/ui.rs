@@ -15,8 +15,9 @@ use std::path::{Path, PathBuf};
 const THUMB_CACHE_BYTES: usize = 48 << 20;
 /// Thumbnail width in points; the engine renders it at `THUMB_WIDTH * pixels_per_point`.
 const THUMB_WIDTH: f32 = 150.0;
-const LABEL_HEIGHT: f32 = 20.0;
-const GAP: f32 = 12.0;
+const LABEL_HEIGHT: f32 = 28.0;
+/// Room for a selected cell's frame (6 pt) and badge (15 pt) without touching a neighbour.
+const GAP: f32 = 24.0;
 
 type GridAction = Box<dyn FnOnce(&mut Workspace)>;
 
@@ -26,6 +27,23 @@ type Message = (&'static str, Vec<(&'static str, String)>);
 fn message_text(tr: &Tr, (key, args): &Message) -> String {
     let args: Vec<(&str, &str)> = args.iter().map(|(n, v)| (*n, v.as_str())).collect();
     tr.tf(key, &args)
+}
+
+/// Accent for the selection frame, number pill and badge: `selection.stroke.color` in both themes.
+/// Not `selection.bg_fill`: pale in light mode, and only 2.3:1 against the panel in dark mode.
+fn selection_accent(v: &egui::Visuals) -> Color32 {
+    v.selection.stroke.color
+}
+
+/// Black or white, whichever contrasts more with `accent` (WCAG luminance).
+fn on_accent(accent: Color32) -> Color32 {
+    let c = egui::Rgba::from(accent);
+    let l = 0.2126 * c.r() + 0.7152 * c.g() + 0.0722 * c.b();
+    if (l + 0.05) / 0.05 > 1.05 / (l + 0.05) {
+        Color32::BLACK
+    } else {
+        Color32::WHITE
+    }
 }
 
 pub struct AdiutorApp {
@@ -52,6 +70,10 @@ pub struct AdiutorApp {
     close_prompt: bool,
     /// A save to an existing file (name had no ".pdf") waiting for the user's confirmation.
     pending_overwrite: Option<(Vec<PageRef>, PathBuf)>,
+    /// `selection_only` of a save the user aimed at an open original.
+    blocked_save: Option<bool>,
+    /// File name shown in the blocked-save modal.
+    blocked_file: String,
     /// The user confirmed closing; stops the cancel loop.
     closing: bool,
     /// The engine thread ended; its error was already shown.
@@ -127,6 +149,8 @@ impl AdiutorApp {
             password_text: String::new(),
             close_prompt: false,
             pending_overwrite: None,
+            blocked_save: None,
+            blocked_file: String::new(),
             closing: false,
             engine_dead: false,
             #[cfg(target_os = "macos")]
@@ -264,7 +288,13 @@ impl AdiutorApp {
     /// Sends one `Save` per (pages, dest) and starts tracking them as a batch.
     fn start_batch(&mut self, jobs: Vec<(Vec<PageRef>, PathBuf)>, split_folder: Option<PathBuf>) {
         if jobs.iter().any(|(_, d)| self.workspace.is_source_path(d)) {
-            self.messages.push(("save.blocked_original", vec![]));
+            let file = jobs
+                .iter()
+                .map(|(_, d)| d)
+                .find(|d| self.workspace.is_source_path(d))
+                .map(|d| file_name(d))
+                .unwrap_or_default();
+            self.error("save.blocked_body", vec![("file", file)]);
             return;
         }
         let all = self.workspace.all_pages();
@@ -294,6 +324,11 @@ impl AdiutorApp {
             name.push(".pdf");
             dest.set_file_name(name);
         }
+        if self.workspace.is_source_path(&dest) {
+            self.blocked_save = Some(selection_only);
+            self.blocked_file = file_name(&dest);
+            return;
+        }
         let pages = if selection_only {
             self.workspace
                 .pages_at(&self.workspace.selected_positions())
@@ -301,7 +336,7 @@ impl AdiutorApp {
             self.workspace.all_pages()
         };
         // The dialog checked the name without ".pdf", so ask before replacing this file.
-        if appended && dest.exists() && !self.workspace.is_source_path(&dest) {
+        if appended && dest.exists() {
             self.pending_overwrite = Some((pages, dest));
             return;
         }
@@ -452,6 +487,13 @@ impl AdiutorApp {
         let mods = ui.input(|i| i.modifiers);
         egui::ScrollArea::vertical()
             .auto_shrink(false)
+            // Room for the selection frame and badge at the edges; inside the clip rect.
+            .content_margin(egui::Margin {
+                left: 16,
+                right: 16,
+                top: 16,
+                bottom: 0,
+            })
             .show(ui, |ui| {
                 ui.spacing_mut().item_spacing = vec2(GAP, GAP);
                 ui.horizontal_wrapped(|ui| {
@@ -488,55 +530,79 @@ impl AdiutorApp {
                         }
                         let img_rect =
                             egui::Rect::from_min_size(rect.min, vec2(THUMB_WIDTH, thumb_h));
-                        match self.cache.get(&slot.page) {
+                        // The page as drawn: letterboxed texture, or the placeholder.
+                        let page_rect = match self.cache.get(&slot.page) {
                             Some(tex) => {
                                 // Letterbox: the rendered bitmap can differ from the clamped cell.
                                 let size = tex.size_vec2();
                                 let scale =
                                     (img_rect.width() / size.x).min(img_rect.height() / size.y);
+                                let r =
+                                    egui::Rect::from_center_size(img_rect.center(), size * scale);
                                 ui.painter().image(
                                     tex.id(),
-                                    egui::Rect::from_center_size(img_rect.center(), size * scale),
+                                    r,
                                     egui::Rect::from_min_max(
                                         egui::pos2(0.0, 0.0),
                                         egui::pos2(1.0, 1.0),
                                     ),
                                     Color32::WHITE,
                                 );
+                                r
                             }
                             None => {
                                 ui.painter()
                                     .rect_filled(img_rect, 2.0, Color32::from_gray(200));
                                 visible.push(slot.page);
+                                img_rect
                             }
-                        }
-                        ui.painter().text(
-                            egui::pos2(rect.center().x, img_rect.max.y + 2.0),
-                            egui::Align2::CENTER_TOP,
+                        };
+                        let selected = self.workspace.is_selected(pos);
+                        let accent = selection_accent(ui.visuals());
+                        let number = ui.painter().layout_no_wrap(
                             (pos + 1).to_string(),
                             egui::FontId::proportional(13.0),
-                            ui.visuals().text_color(),
+                            if selected {
+                                on_accent(accent)
+                            } else {
+                                ui.visuals().text_color()
+                            },
                         );
-                        if self.workspace.is_selected(pos) {
-                            // Thick frame plus a check badge, so selection is not color-only.
-                            let accent = ui.visuals().selection.bg_fill;
+                        // Below the frame, which reaches 6 pt under the page.
+                        let number_rect = egui::Align2::CENTER_TOP.anchor_size(
+                            egui::pos2(rect.center().x, img_rect.max.y + 10.0),
+                            number.size(),
+                        );
+                        if selected {
+                            // Frame, pill and check badge, so selection is not color-only.
+                            let frame = page_rect.expand(3.0);
                             ui.painter().rect_stroke(
-                                rect.expand(3.0),
-                                3.0,
+                                frame,
+                                6.0,
                                 egui::Stroke::new(3.0, accent),
-                                egui::StrokeKind::Inside,
+                                egui::StrokeKind::Outside,
                             );
-                            let c = img_rect.left_top() + vec2(14.0, 14.0);
-                            ui.painter().circle_filled(c, 10.0, accent);
+                            let pill = number_rect.expand2(vec2(7.0, 1.0));
+                            ui.painter().rect_filled(pill, pill.height() / 2.0, accent);
+                            let c = frame.right_top();
+                            // Stroke is centred on the radius: accent disc of 10, ring out to 12.
+                            ui.painter().circle(
+                                c,
+                                11.0,
+                                accent,
+                                egui::Stroke::new(2.0, ui.visuals().panel_fill),
+                            );
                             ui.painter().line(
                                 vec![
                                     c + vec2(-4.5, 0.0),
                                     c + vec2(-1.0, 3.5),
                                     c + vec2(5.0, -3.5),
                                 ],
-                                egui::Stroke::new(2.0, Color32::WHITE),
+                                egui::Stroke::new(2.0, on_accent(accent)),
                             );
                         }
+                        ui.painter()
+                            .galley(number_rect.min, number, Color32::PLACEHOLDER);
                     }
                 });
                 // Over a cell or a gap of the grid, the drop goes next to the nearest cell.
@@ -562,9 +628,13 @@ impl AdiutorApp {
                     };
                     // Keep the 3 pt line inside the clip, e.g. before a row's first cell.
                     let x = x.clamp(clip.left() + 1.5, clip.right() - 1.5);
+                    // Start below the badge, which reaches 15 pt above and right of a selected page.
                     ui.painter().line_segment(
-                        [egui::pos2(x, rect.top()), egui::pos2(x, rect.bottom())],
-                        egui::Stroke::new(3.0, ui.visuals().selection.bg_fill),
+                        [
+                            egui::pos2(x, rect.top() + 16.0),
+                            egui::pos2(x, rect.bottom()),
+                        ],
+                        egui::Stroke::new(3.0, selection_accent(ui.visuals())),
                     );
                     if ui.input(|i| i.pointer.any_released())
                         && egui::DragAndDrop::take_payload::<usize>(ui.ctx()).is_some()
@@ -671,6 +741,33 @@ impl AdiutorApp {
         }
     }
 
+    fn blocked_modal(&mut self, ctx: &egui::Context) {
+        if self.blocked_save.is_none() {
+            return;
+        }
+        let body = self
+            .tr
+            .tf("save.blocked_body", &[("file", &self.blocked_file)]);
+        let answer = confirm_modal(
+            ctx,
+            &self.tr,
+            "blocked",
+            "save.blocked_title",
+            &body,
+            "save.blocked_rename",
+        );
+        match answer {
+            // Closed before reopening the dialog, which blocks until it is dismissed.
+            Some(true) => {
+                if let Some(selection_only) = self.blocked_save.take() {
+                    self.save(selection_only);
+                }
+            }
+            Some(false) => self.blocked_save = None,
+            None => {}
+        }
+    }
+
     fn close_modal(&mut self, ctx: &egui::Context) {
         if !self.close_prompt {
             return;
@@ -743,14 +840,22 @@ impl eframe::App for AdiutorApp {
             self.open(path);
         }
 
-        let modal_open =
-            self.close_prompt || !self.passwords.is_empty() || self.pending_overwrite.is_some();
+        let modal_open = self.close_prompt
+            || !self.passwords.is_empty()
+            || self.pending_overwrite.is_some()
+            || self.blocked_save.is_some();
         let delete = !modal_open
             && !ctx.egui_wants_keyboard_input()
             && ctx
                 .input(|i| i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace));
         if delete {
             self.workspace.delete_selected();
+        }
+        if !modal_open
+            && !ctx.egui_wants_keyboard_input()
+            && ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::A))
+        {
+            self.workspace.select_all();
         }
 
         if let Err(reason) = &self.engine {
@@ -763,6 +868,7 @@ impl eframe::App for AdiutorApp {
         egui::CentralPanel::default().show(ui, |ui| self.grid(ui));
         self.password_modal(&ctx);
         self.overwrite_modal(&ctx);
+        self.blocked_modal(&ctx);
         self.close_modal(&ctx);
     }
 }
@@ -772,6 +878,34 @@ mod tests {
     use super::*;
     use egui_kittest::Harness;
     use egui_kittest::kittest::Queryable;
+
+    /// WCAG contrast ratio, from sRGB relative luminance.
+    fn contrast(a: Color32, b: Color32) -> f32 {
+        let lum = |c: Color32| {
+            let lin = |u: u8| {
+                let s = u as f32 / 255.0;
+                if s <= 0.04045 {
+                    s / 12.92
+                } else {
+                    ((s + 0.055) / 1.055).powf(2.4)
+                }
+            };
+            0.2126 * lin(c.r()) + 0.7152 * lin(c.g()) + 0.0722 * lin(c.b())
+        };
+        let (x, y) = (lum(a), lum(b));
+        (x.max(y) + 0.05) / (x.min(y) + 0.05)
+    }
+
+    #[test]
+    fn selection_colours_have_enough_contrast() {
+        for v in [egui::Visuals::light(), egui::Visuals::dark()] {
+            let accent = selection_accent(&v);
+            let c = contrast(accent, v.panel_fill);
+            assert!(c >= 3.0, "accent {accent:?} vs panel: {c}");
+            let c = contrast(on_accent(accent), accent);
+            assert!(c >= 4.5, "text on {accent:?}: {c}");
+        }
+    }
 
     #[test]
     fn messages_are_translated_when_drawn() {
@@ -835,5 +969,40 @@ mod tests {
         harness.key_press(egui::Key::Escape);
         harness.run();
         assert_eq!(*harness.state(), Some(false));
+    }
+
+    #[test]
+    fn blocked_modal_buttons_and_escape() {
+        let make = || {
+            let tr = Tr::new(Lang::En);
+            let mut harness = Harness::new_ui_state(
+                move |ui, answer: &mut Option<bool>| {
+                    let a = confirm_modal(
+                        ui.ctx(),
+                        &tr,
+                        "blocked",
+                        "save.blocked_title",
+                        "a.pdf is one of the open files. The original is never modified.",
+                        "save.blocked_rename",
+                    );
+                    *answer = answer.or(a);
+                },
+                None,
+            );
+            harness.run();
+            harness
+        };
+        let mut h = make();
+        h.get_by_label("Choose another name").click();
+        h.run();
+        assert_eq!(*h.state(), Some(true));
+        let mut h = make();
+        h.get_by_label("Cancel").click();
+        h.run();
+        assert_eq!(*h.state(), Some(false));
+        let mut h = make();
+        h.key_press(egui::Key::Escape);
+        h.run();
+        assert_eq!(*h.state(), Some(false));
     }
 }

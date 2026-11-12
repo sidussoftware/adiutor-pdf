@@ -123,6 +123,12 @@ impl Workspace {
         self.selected = self.slots[lo..=hi].iter().map(|s| s.id).collect();
     }
 
+    /// Ctrl/Cmd+A: selects every page; the anchor becomes the first page.
+    pub fn select_all(&mut self) {
+        self.selected = self.slots.iter().map(|s| s.id).collect();
+        self.anchor = self.slots.first().map(|s| s.id);
+    }
+
     /// Replaces the selection (positions out of range are ignored).
     pub fn set_selection(&mut self, positions: &[usize]) {
         self.selected = positions
@@ -386,6 +392,20 @@ mod tests {
         ws.toggle(2);
         ws.toggle(0);
         assert_eq!(ws.selected_positions(), [2]);
+    }
+
+    #[test]
+    fn select_all_selects_every_page_without_dirtying() {
+        let mut ws = ws_with(&[3, 2]);
+        ws.mark_saved();
+        ws.select_all();
+        assert_eq!(ws.selected_positions(), [0, 1, 2, 3, 4]);
+        assert!(!ws.is_dirty());
+        ws.select_range_to(1); // the anchor is the first page
+        assert_eq!(ws.selected_positions(), [0, 1]);
+        let mut empty = Workspace::new();
+        empty.select_all();
+        assert!(!empty.has_selection());
     }
 
     #[test]

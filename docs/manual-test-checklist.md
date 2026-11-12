@@ -7,6 +7,7 @@ Tick an item only after doing it on a real build. Tasks 7 and 8 add their checks
 - [ ] "Add PDF" button opens a multi-file picker filtered to `*.pdf`
 - [ ] Dropping two PDFs on the window adds all their pages in order
 - [ ] Empty workspace shows the hint; engine start failure shows the reason and searched locations
+- [ ] The window opens maximized (needs a window manager; not observable under bare Xvfb)
 
 ## Thumbnails
 - [x] Thumbnails fill in for the visible pages after load (Xvfb screenshot)
@@ -16,6 +17,8 @@ Tick an item only after doing it on a real build. Tasks 7 and 8 add their checks
 ## Selection
 - [x] Click selects one page; Ctrl+click toggles; Shift+click selects the range from the anchor (Xvfb, xdotool, screenshots)
 - [x] Selected pages show a thick frame plus a check badge (not color alone)
+- [x] Ctrl+A (Cmd+A on macOS) selects all pages; inside the Pages field it selects the field's text and no page (Xvfb, xdotool, screenshots)
+- [x] Pages 1 and 2 selected, light and dark themes: rounded frame around the page only, number in a pill, check badge on the frame's top-right corner; the first row and column are not clipped (Xvfb screenshots)
 - [x] Type `11-12` with two 10-page files and press Enter: the first two pages of the second file are selected (Xvfb; confirmed by Backspace removing B1 and B2)
 - [x] Type `3-1`: field gets a red frame and "Invalid range: 3 is greater than 1" appears; editing the text clears it
 - [ ] Italian messages for the range errors with `LANG=it_IT.UTF-8`
@@ -27,7 +30,7 @@ Tick an item only after doing it on a real build. Tasks 7 and 8 add their checks
 ## Save
 - [x] Reorder, then "Save all as one PDF": the output has the pages in the grid order (pypdf page widths [300, 700, 400, 500, 600]) (Xvfb + xdg-desktop-portal-gtk, xdotool, screenshots)
 - [x] "Save selection" writes only the selected page; default name is `<first source>_edited.pdf` (Xvfb + xdg-desktop-portal-gtk, xdotool, screenshots)
-- [x] Saving over an open source file shows "Choose another name..." and leaves the file unchanged (Xvfb + xdg-desktop-portal-gtk, xdotool, screenshots)
+- [x] Saving over an open original shows the blocked modal; "Choose another name" reopens the save dialog; the original is unchanged (Xvfb + xdg-desktop-portal-gtk, xdotool, sha256)
 - [x] Messages stack at the bottom and each Close button dismisses its own line
 - [ ] Progress bar visible while saving a large file; Save/Split disabled meanwhile
 ## Split
