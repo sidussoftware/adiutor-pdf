@@ -15,8 +15,8 @@ use std::path::{Path, PathBuf};
 const THUMB_CACHE_BYTES: usize = 48 << 20;
 /// Thumbnail width in points; the engine renders it at `THUMB_WIDTH * pixels_per_point`.
 const THUMB_WIDTH: f32 = 150.0;
-const LABEL_HEIGHT: f32 = 20.0;
-const GAP: f32 = 12.0;
+const LABEL_HEIGHT: f32 = 28.0;
+const GAP: f32 = 18.0;
 
 type GridAction = Box<dyn FnOnce(&mut Workspace)>;
 
@@ -26,6 +26,23 @@ type Message = (&'static str, Vec<(&'static str, String)>);
 fn message_text(tr: &Tr, (key, args): &Message) -> String {
     let args: Vec<(&str, &str)> = args.iter().map(|(n, v)| (*n, v.as_str())).collect();
     tr.tf(key, &args)
+}
+
+/// Strong theme colour for the selection frame, number pill and badge. Not `selection.bg_fill`:
+/// it is pale in light mode and too dark against the panel (2.3:1) in dark mode.
+fn selection_accent(v: &egui::Visuals) -> Color32 {
+    v.selection.stroke.color
+}
+
+/// Black or white, whichever contrasts more with `accent` (WCAG luminance).
+fn on_accent(accent: Color32) -> Color32 {
+    let c = egui::Rgba::from(accent);
+    let l = 0.2126 * c.r() + 0.7152 * c.g() + 0.0722 * c.b();
+    if (l + 0.05) / 0.05 > 1.05 / (l + 0.05) {
+        Color32::BLACK
+    } else {
+        Color32::WHITE
+    }
 }
 
 pub struct AdiutorApp {
@@ -469,6 +486,13 @@ impl AdiutorApp {
         let mods = ui.input(|i| i.modifiers);
         egui::ScrollArea::vertical()
             .auto_shrink(false)
+            // Room for the selection frame and badge at the edges; inside the clip rect.
+            .content_margin(egui::Margin {
+                left: 16,
+                right: 16,
+                top: 16,
+                bottom: 0,
+            })
             .show(ui, |ui| {
                 ui.spacing_mut().item_spacing = vec2(GAP, GAP);
                 ui.horizontal_wrapped(|ui| {
@@ -505,55 +529,79 @@ impl AdiutorApp {
                         }
                         let img_rect =
                             egui::Rect::from_min_size(rect.min, vec2(THUMB_WIDTH, thumb_h));
-                        match self.cache.get(&slot.page) {
+                        // The page as drawn: letterboxed texture, or the placeholder.
+                        let page_rect = match self.cache.get(&slot.page) {
                             Some(tex) => {
                                 // Letterbox: the rendered bitmap can differ from the clamped cell.
                                 let size = tex.size_vec2();
                                 let scale =
                                     (img_rect.width() / size.x).min(img_rect.height() / size.y);
+                                let r =
+                                    egui::Rect::from_center_size(img_rect.center(), size * scale);
                                 ui.painter().image(
                                     tex.id(),
-                                    egui::Rect::from_center_size(img_rect.center(), size * scale),
+                                    r,
                                     egui::Rect::from_min_max(
                                         egui::pos2(0.0, 0.0),
                                         egui::pos2(1.0, 1.0),
                                     ),
                                     Color32::WHITE,
                                 );
+                                r
                             }
                             None => {
                                 ui.painter()
                                     .rect_filled(img_rect, 2.0, Color32::from_gray(200));
                                 visible.push(slot.page);
+                                img_rect
                             }
-                        }
-                        ui.painter().text(
-                            egui::pos2(rect.center().x, img_rect.max.y + 2.0),
-                            egui::Align2::CENTER_TOP,
+                        };
+                        let selected = self.workspace.is_selected(pos);
+                        let accent = selection_accent(ui.visuals());
+                        let number = ui.painter().layout_no_wrap(
                             (pos + 1).to_string(),
                             egui::FontId::proportional(13.0),
-                            ui.visuals().text_color(),
+                            if selected {
+                                on_accent(accent)
+                            } else {
+                                ui.visuals().text_color()
+                            },
                         );
-                        if self.workspace.is_selected(pos) {
-                            // Thick frame plus a check badge, so selection is not color-only.
-                            let accent = ui.visuals().selection.bg_fill;
+                        // Below the frame, which reaches 6 pt under the page.
+                        let number_rect = egui::Align2::CENTER_TOP.anchor_size(
+                            egui::pos2(rect.center().x, img_rect.max.y + 10.0),
+                            number.size(),
+                        );
+                        if selected {
+                            // Frame, pill and check badge, so selection is not color-only.
+                            let frame = page_rect.expand(3.0);
                             ui.painter().rect_stroke(
-                                rect.expand(3.0),
-                                3.0,
+                                frame,
+                                6.0,
                                 egui::Stroke::new(3.0, accent),
-                                egui::StrokeKind::Inside,
+                                egui::StrokeKind::Outside,
                             );
-                            let c = img_rect.left_top() + vec2(14.0, 14.0);
-                            ui.painter().circle_filled(c, 10.0, accent);
+                            let pill = number_rect.expand2(vec2(7.0, 1.0));
+                            ui.painter().rect_filled(pill, pill.height() / 2.0, accent);
+                            let c = frame.right_top();
+                            // Stroke is centred on the radius: accent disc of 10, ring out to 12.
+                            ui.painter().circle(
+                                c,
+                                11.0,
+                                accent,
+                                egui::Stroke::new(2.0, ui.visuals().panel_fill),
+                            );
                             ui.painter().line(
                                 vec![
                                     c + vec2(-4.5, 0.0),
                                     c + vec2(-1.0, 3.5),
                                     c + vec2(5.0, -3.5),
                                 ],
-                                egui::Stroke::new(2.0, Color32::WHITE),
+                                egui::Stroke::new(2.0, on_accent(accent)),
                             );
                         }
+                        ui.painter()
+                            .galley(number_rect.min, number, Color32::PLACEHOLDER);
                     }
                 });
                 // Over a cell or a gap of the grid, the drop goes next to the nearest cell.
@@ -825,6 +873,34 @@ mod tests {
     use super::*;
     use egui_kittest::Harness;
     use egui_kittest::kittest::Queryable;
+
+    /// WCAG contrast ratio, from sRGB relative luminance.
+    fn contrast(a: Color32, b: Color32) -> f32 {
+        let lum = |c: Color32| {
+            let lin = |u: u8| {
+                let s = u as f32 / 255.0;
+                if s <= 0.04045 {
+                    s / 12.92
+                } else {
+                    ((s + 0.055) / 1.055).powf(2.4)
+                }
+            };
+            0.2126 * lin(c.r()) + 0.7152 * lin(c.g()) + 0.0722 * lin(c.b())
+        };
+        let (x, y) = (lum(a), lum(b));
+        (x.max(y) + 0.05) / (x.min(y) + 0.05)
+    }
+
+    #[test]
+    fn selection_colours_have_enough_contrast() {
+        for v in [egui::Visuals::light(), egui::Visuals::dark()] {
+            let accent = selection_accent(&v);
+            let c = contrast(accent, v.panel_fill);
+            assert!(c >= 3.0, "accent {accent:?} vs panel: {c}");
+            let c = contrast(on_accent(accent), accent);
+            assert!(c >= 4.5, "text on {accent:?}: {c}");
+        }
+    }
 
     #[test]
     fn messages_are_translated_when_drawn() {
