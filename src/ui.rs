@@ -752,6 +752,12 @@ impl eframe::App for AdiutorApp {
         if delete {
             self.workspace.delete_selected();
         }
+        if !modal_open
+            && !ctx.egui_wants_keyboard_input()
+            && ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::A))
+        {
+            self.workspace.select_all();
+        }
 
         if let Err(reason) = &self.engine {
             let text = self.tr.tf("error.engine_start", &[("reason", reason)]);

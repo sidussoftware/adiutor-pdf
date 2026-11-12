@@ -19,6 +19,7 @@ pub fn run() -> eframe::Result<()> {
         viewport: eframe::egui::ViewportBuilder::default()
             .with_title(tr.t("app.title"))
             .with_inner_size([1000.0, 700.0])
+            .with_maximized(true)
             .with_drag_and_drop(true),
         // Without the default menu, Cmd+Q reaches the app and goes through the unsaved-changes prompt.
         #[cfg(target_os = "macos")]
