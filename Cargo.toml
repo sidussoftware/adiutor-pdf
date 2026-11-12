@@ -18,7 +18,7 @@ winit = { version = "0.30.13", default-features = false }
 # Quit from the Dock / logout as a `quit` Apple event (src/macos.rs). Pinned exactly: the 0.1.0
 # source was reviewed; review the diff before bumping. objc2 crates: same versions as Cargo.lock.
 fmv-macos-events = "=0.1.0"
-objc2-foundation = { version = "=0.3.2", default-features = false, features = ["std"] }
+objc2-foundation = { version = "=0.3.2", default-features = false, features = ["std", "NSArray"] }
 objc2-app-kit = { version = "=0.3.2", default-features = false, features = ["std", "NSApplication", "NSResponder", "NSWindow"] }
 
 [dev-dependencies]

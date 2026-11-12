@@ -32,7 +32,8 @@ impl QuitEvents {
 }
 
 /// A Dock quit can reach the app while it is hidden, minimized or behind other apps; make the
-/// unsaved-changes question visible, and bounce the Dock icon if macOS refuses to activate us.
+/// unsaved-changes question visible. Activation is asynchronous, so the Dock icon usually bounces
+/// too; the bounce stops by itself once the app is active.
 pub fn bring_app_forward() {
     let Some(mtm) = MainThreadMarker::new() else {
         return;

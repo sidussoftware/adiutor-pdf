@@ -47,7 +47,8 @@ Tick an item only after doing it on a real build. Tasks 7 and 8 add their checks
 - [ ] macOS: with unsaved changes, Cmd+Q shows the "Unsaved changes" modal
 - [ ] macOS: with unsaved changes, Dock icon → Quit shows the modal; Cancel keeps the app open, "Close anyway" exits
 - [ ] macOS: same with the app minimized, then hidden (Cmd+H is off, use the Dock menu "Hide"): the app comes forward or its Dock icon bounces
-- [ ] macOS: with unsaved changes, Apple menu → Log Out: the modal appears and Cancel stops the logout
+- [ ] macOS: with unsaved changes, Apple menu → Log Out: the modal appears; Cancel stops the logout (macOS may say the app interrupted it); note what macOS shows
+- [ ] Minimize the window with unsaved changes, then close it from the taskbar / Dock / window menu (Windows, Linux, macOS): the modal appears when the window comes back
 - [ ] macOS: without unsaved changes, Dock → Quit exits immediately
 ## Language
 - [x] Language combo switches the whole UI between English and Italiano immediately (Xvfb screenshot)

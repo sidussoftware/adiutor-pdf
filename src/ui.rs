@@ -694,20 +694,18 @@ impl AdiutorApp {
     }
 }
 
+impl AdiutorApp {
+    /// True if closing now would lose something, so the close must be confirmed first.
+    fn needs_close_confirm(&self) -> bool {
+        self.workspace.is_dirty() || self.batch.is_some()
+    }
+}
+
 impl eframe::App for AdiutorApp {
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        let ctx = ui.ctx().clone();
-        self.handle_events(&ctx);
-        let dropped: Vec<PathBuf> = ctx.input(|i| {
-            i.raw
-                .dropped_files
-                .iter()
-                .map(|f| f.path().to_path_buf())
-                .collect()
-        });
-        for path in dropped {
-            self.open(path);
-        }
+    // eframe calls `logic` every pass, but `ui` only while the window is visible (not minimized,
+    // hidden or covered), so anything that must work then lives here.
+    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.handle_events(ctx);
 
         // The default macOS menu is off (see lib.rs), so Cmd+Q arrives here as a key press.
         #[cfg(target_os = "macos")]
@@ -718,17 +716,31 @@ impl eframe::App for AdiutorApp {
         #[cfg(target_os = "macos")]
         if self.quit_events.quit_requested() {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-            if self.workspace.is_dirty() || self.batch.is_some() {
+            if self.needs_close_confirm() {
                 crate::macos::bring_app_forward();
             }
         }
 
         if ctx.input(|i| i.viewport().close_requested())
             && !self.closing
-            && (self.workspace.is_dirty() || self.batch.is_some())
+            && self.needs_close_confirm()
         {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             self.close_prompt = true;
+        }
+    }
+
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let ctx = ui.ctx().clone();
+        let dropped: Vec<PathBuf> = ctx.input(|i| {
+            i.raw
+                .dropped_files
+                .iter()
+                .map(|f| f.path().to_path_buf())
+                .collect()
+        });
+        for path in dropped {
+            self.open(path);
         }
 
         let modal_open =

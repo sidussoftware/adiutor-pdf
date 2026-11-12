@@ -34,7 +34,8 @@ The archive bundles PDFium only. The system must provide:
 
 - Cmd+Q, the window's close button, Quit from the Dock and logging out all show the unsaved-changes prompt.
   If the app is hidden or minimized when the Dock quit arrives, it comes to the front (or its Dock icon
-  bounces) so the prompt is seen; cancelling it also cancels the logout.
+  bounces) so the prompt is seen. Cancelling it during a logout stops the logout (macOS reports that
+  adiutor-pdf interrupted it); after "Close anyway", start the logout again.
 - The default macOS app menu (Hide, About, ...) is intentionally turned off, so that Cmd+Q reaches the app and
   goes through the unsaved-changes prompt.
 
