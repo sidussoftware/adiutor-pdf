@@ -1,6 +1,11 @@
 name: CI
 
-on: [push, pull_request, workflow_call]
+on:
+  # Pushes to main are covered by release.yml, which calls this workflow on every push to main.
+  push:
+    branches-ignore: [main]
+  pull_request:
+  workflow_call:
 
 permissions:
   contents: read
