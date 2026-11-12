@@ -16,7 +16,8 @@ const THUMB_CACHE_BYTES: usize = 48 << 20;
 /// Thumbnail width in points; the engine renders it at `THUMB_WIDTH * pixels_per_point`.
 const THUMB_WIDTH: f32 = 150.0;
 const LABEL_HEIGHT: f32 = 28.0;
-const GAP: f32 = 18.0;
+/// Room for a selected cell's frame (6 pt) and badge (15 pt) without touching a neighbour.
+const GAP: f32 = 24.0;
 
 type GridAction = Box<dyn FnOnce(&mut Workspace)>;
 
@@ -28,8 +29,8 @@ fn message_text(tr: &Tr, (key, args): &Message) -> String {
     tr.tf(key, &args)
 }
 
-/// Strong theme colour for the selection frame, number pill and badge. Not `selection.bg_fill`:
-/// it is pale in light mode and too dark against the panel (2.3:1) in dark mode.
+/// Accent for the selection frame, number pill and badge: `selection.stroke.color` in both themes.
+/// Not `selection.bg_fill`: pale in light mode, and only 2.3:1 against the panel in dark mode.
 fn selection_accent(v: &egui::Visuals) -> Color32 {
     v.selection.stroke.color
 }
