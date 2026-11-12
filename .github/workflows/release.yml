@@ -14,11 +14,9 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # Release builds start only after the full CI matrix passes. ci.yml also runs on its own push
-  # trigger for main, so CI runs twice, but only for a merge that builds a release.
+  # The one CI run for each push to main (ci.yml skips main), so two macOS jobs never wait for the
+  # same runners. Release builds start only after the full CI matrix passes.
   ci:
-    needs: check
-    if: needs.check.outputs.create == 'true'
     uses: ./.github/workflows/ci.yml
 
   check:
