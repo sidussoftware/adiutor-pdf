@@ -11,7 +11,8 @@ Some of these protocol definitions are licensed under the GNU Lesser General
 Public License, version 2.1 or (at your option) any later version
 (LGPL-2.1-or-later). The license text is in LGPL-2.1.txt in this folder.
 
-LGPL-2.1-or-later files and their copyright holders (SPDX-FileCopyrightText):
+LGPL-2.1-or-later files and their copyright holders (SPDX-FileCopyrightText),
+in wayland-protocols-plasma-0.3.12/plasma-wayland-protocols/src/protocols/:
 
   appmenu.xml                        2017 David Edmundson
   blur.xml                           2015 Martin Gräßlin; 2015 Marco Martin
@@ -33,15 +34,18 @@ LGPL-2.1-or-later files and their copyright holders (SPDX-FileCopyrightText):
 
 The other protocol files of the crate are under MIT-CMU, MIT or BSD-3-Clause,
 as stated in each file's header (fullscreen-shell.xml has no license header).
-Their license texts are in plasma-wayland-protocols/LICENSES/.
+Their license texts are in
+wayland-protocols-plasma-0.3.12/plasma-wayland-protocols/LICENSES/.
 
 Source of the protocol definitions
 ----------------------------------
 
-All protocol XML files bundled in wayland-protocols-plasma 0.3.12 are included
-in the plasma-wayland-protocols/ folder next to this notice. They are the
-complete source of the LGPL-2.1-or-later material in this program. They are
-also available from crates.io (crate wayland-protocols-plasma) and from
+The complete wayland-protocols-plasma 0.3.12 crate, as published on
+crates.io, is included in the wayland-protocols-plasma-0.3.12/ folder next to
+this notice: its Cargo.toml, its Rust code and all bundled protocol XML files
+with their licenses. The XML files are the complete source of the
+LGPL-2.1-or-later material in this program. They are also available from
+crates.io (crate wayland-protocols-plasma) and from
 https://invent.kde.org/libraries/plasma-wayland-protocols.
 
 Modifying and rebuilding
@@ -52,5 +56,10 @@ The complete source code of adiutor-pdf for this version, including Cargo.lock
 "Source code" and is available at https://github.com/sidussoftware/adiutor-pdf.
 You may modify the protocol files and rebuild the program with your changes:
 follow "Build from source" in README.md, and point Cargo at your modified copy
-of wayland-protocols-plasma (for example with a [patch.crates-io] entry in
-Cargo.toml).
+of the crate folder by adding to adiutor-pdf's Cargo.toml:
+
+  [patch.crates-io]
+  wayland-protocols-plasma = { path = "<path to>/wayland-protocols-plasma-0.3.12" }
+
+As LGPL-2.1 section 6 requires, you may modify this program for your own use
+and reverse engineer it to debug such modifications.

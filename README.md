@@ -90,9 +90,10 @@ Release packages include the licenses of the third-party software they contain, 
 
 The Linux build contains code generated from KDE Plasma Wayland protocol definitions, some of which are licensed
 under LGPL-2.1-or-later (through the crate `wayland-protocols-plasma`, used by the windowing library). The Linux
-package includes the license, a notice and these protocol files in `licenses/lgpl/`. The complete source of
-adiutor-pdf is in this repository and attached to each release; see "Build from source" to rebuild it with modified
-protocol files.
+package includes the license, a notice and the complete `wayland-protocols-plasma` crate with these protocol files
+in `licenses/lgpl/`. The complete source of adiutor-pdf is in this repository and attached to each release. To
+rebuild with modified protocol files, follow "Build from source" and point a `[patch.crates-io]` entry in
+`Cargo.toml` at the modified crate folder (see `licenses/lgpl/NOTICE.txt`).
 
 This software is based in part on the work of the Independent JPEG Group.
 
