@@ -32,9 +32,9 @@ The archive bundles PDFium only. The system must provide:
 
 ### macOS notes
 
-- Choosing Quit from the Dock, or logging out with the app open, closes it **without** the
-  unsaved-changes prompt (a limitation of winit 0.30, the windowing library). Cmd+Q and the window's close button
-  do show the prompt.
+- Cmd+Q, the window's close button, Quit from the Dock and logging out all show the unsaved-changes prompt.
+  If the app is hidden or minimized when the Dock quit arrives, it comes to the front (or its Dock icon
+  bounces) so the prompt is seen; cancelling it also cancels the logout.
 - The default macOS app menu (Hide, About, ...) is intentionally turned off, so that Cmd+Q reaches the app and
   goes through the unsaved-changes prompt.
 

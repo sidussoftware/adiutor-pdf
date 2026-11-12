@@ -56,6 +56,8 @@ pub struct AdiutorApp {
     closing: bool,
     /// The engine thread ended; its error was already shown.
     engine_dead: bool,
+    #[cfg(target_os = "macos")]
+    quit_events: crate::macos::QuitEvents,
 }
 
 fn range_error_text(tr: &Tr, e: &RangeError) -> String {
@@ -127,6 +129,8 @@ impl AdiutorApp {
             pending_overwrite: None,
             closing: false,
             engine_dead: false,
+            #[cfg(target_os = "macos")]
+            quit_events: crate::macos::QuitEvents::install(ctx),
         };
         for path in startup_paths {
             app.open(path);
@@ -709,6 +713,14 @@ impl eframe::App for AdiutorApp {
         #[cfg(target_os = "macos")]
         if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::Q)) {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        }
+        // Quit from the Dock or logout: same path as closing the window, so unsaved changes ask.
+        #[cfg(target_os = "macos")]
+        if self.quit_events.quit_requested() {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            if self.workspace.is_dirty() || self.batch.is_some() {
+                crate::macos::bring_app_forward();
+            }
         }
 
         if ctx.input(|i| i.viewport().close_requested())
