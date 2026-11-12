@@ -206,7 +206,8 @@ On every push and pull request, on Windows, macOS and Linux:
 - `cargo fmt --check`
 - `cargo clippy -- -D warnings`
 - `cargo test`, with PDFium downloaded from `bblanchon/pdfium-binaries` at a **pinned** version.
-- `cargo about generate` (Linux only): fails when a dependency's license is not accepted in `about.toml`.
+- `scripts/third-party-licenses.sh` (cargo-about, Linux only): fails when a dependency's license is not accepted
+  in `about.toml` or a clarified copyright line is missing.
 
 ### Release (`.github/workflows/release.yml`)
 

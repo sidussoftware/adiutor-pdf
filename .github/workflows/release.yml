@@ -60,7 +60,7 @@ jobs:
         run: |
           cargo install --locked cargo-about --version 0.9.3 --features cli
           mkdir -p notices/fonts
-          cargo about generate --locked --fail -o notices/THIRD-PARTY-LICENSES.html about.hbs
+          bash scripts/third-party-licenses.sh notices/THIRD-PARTY-LICENSES.html
           crate=$(cargo metadata --locked --format-version 1 |
             jq -er '.packages[] | select(.name == "epaint_default_fonts") | .manifest_path')
           fonts="$(dirname "$crate")/fonts"
@@ -150,6 +150,9 @@ jobs:
           cp packaging/macos/Info.plist "$app/Info.plist"
           plutil -replace CFBundleShortVersionString -string "$VERSION" "$app/Info.plist"
           plutil -replace CFBundleVersion -string "$VERSION" "$app/Info.plist"
+          # Only the arm64 notices are shipped; fail if the x64 ones ever differ.
+          diff -r pdfium-x64/licenses pdfium-arm64/licenses
+          cmp pdfium-x64/LICENSE pdfium-arm64/LICENSE
           cp pdfium-arm64/LICENSE pdfium-arm64/licenses/* licenses/pdfium/
           cp -R notices/. licenses/
           # Ad-hoc signature so Apple Silicon allows launching the app.
