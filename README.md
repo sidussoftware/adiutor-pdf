@@ -88,6 +88,12 @@ Release packages include the licenses of the third-party software they contain, 
 - Fonts embedded by egui: `licenses/fonts/` — Ubuntu Light (Ubuntu Font Licence 1.0), Hack (MIT and Bitstream
   Vera License), Noto Emoji (SIL Open Font License 1.1) and emoji-icon-font (MIT).
 
+The Linux build contains code generated from KDE Plasma Wayland protocol definitions, some of which are licensed
+under LGPL-2.1-or-later (through the crate `wayland-protocols-plasma`, used by the windowing library). The Linux
+package includes the license, a notice and these protocol files in `licenses/lgpl/`. The complete source of
+adiutor-pdf is in this repository and attached to each release; see "Build from source" to rebuild it with modified
+protocol files.
+
 This software is based in part on the work of the Independent JPEG Group.
 
 Portions of this software are copyright © 2026 The FreeType Project (www.freetype.org). All rights reserved.

@@ -191,6 +191,21 @@ jobs:
             packaging/linux/adiutor-pdf.png LICENSE-MIT LICENSE-APACHE README.md "$pkg/"
           cp pdfium/LICENSE pdfium/licenses/* "$pkg/licenses/pdfium/"
           cp -R notices/. "$pkg/licenses/"
+          # LGPL-2.1 material (Linux only): winit's Wayland backend uses wayland-protocols-plasma.
+          lgpl="$pkg/licenses/lgpl"
+          mkdir -p "$lgpl/plasma-wayland-protocols"
+          cp packaging/licenses/LGPL-2.1.txt packaging/licenses/NOTICE.txt "$lgpl/"
+          plasma=$(cargo metadata --locked --format-version 1 |
+            jq -er '.packages[] | select(.name == "wayland-protocols-plasma") | "\(.version) \(.manifest_path)"')
+          # NOTICE.txt lists the LGPL files of this exact version.
+          if [ "${plasma%% *}" != 0.3.12 ]; then
+            echo "wayland-protocols-plasma is ${plasma%% *}: update packaging/licenses/NOTICE.txt" >&2
+            exit 1
+          fi
+          src="$(dirname "${plasma#* }")/plasma-wayland-protocols"
+          [ "$(find "$src" -name '*.xml' | wc -l)" -gt 0 ]
+          find "$src" -name '*.xml' -exec cp {} "$lgpl/plasma-wayland-protocols/" \;
+          cp -R "$src/LICENSES" "$lgpl/plasma-wayland-protocols/"
           tar --owner=0 --group=0 -czf "$pkg.tar.gz" "$pkg"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:

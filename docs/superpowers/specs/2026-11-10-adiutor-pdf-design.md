@@ -222,6 +222,8 @@ On every push and pull request, on Windows, macOS and Linux:
   - Linux x86-64: `.tar.gz` with one folder holding the executable and `libpdfium.so`, built on the oldest
     available Ubuntu runner for broad glibc compatibility.
     Changed in v0.1.2: Linux ships as .tar.gz (the AppImage runtime embeds LGPL libfuse).
+    It also carries `licenses/lgpl/` (LGPL-2.1 text, NOTICE.txt, the protocol XML files) for the
+    LGPL-2.1-or-later KDE protocol definitions that winit's Wayland backend compiles in via `wayland-protocols-plasma`.
 - Builds are unsigned. The README explains how to get past the Windows SmartScreen and macOS Gatekeeper warnings.
 
 ## 10. Repository layout
