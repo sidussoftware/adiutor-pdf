@@ -628,9 +628,13 @@ impl AdiutorApp {
                     };
                     // Keep the 3 pt line inside the clip, e.g. before a row's first cell.
                     let x = x.clamp(clip.left() + 1.5, clip.right() - 1.5);
+                    // Start below the badge, which reaches 15 pt above and right of a selected page.
                     ui.painter().line_segment(
-                        [egui::pos2(x, rect.top()), egui::pos2(x, rect.bottom())],
-                        egui::Stroke::new(3.0, ui.visuals().selection.bg_fill),
+                        [
+                            egui::pos2(x, rect.top() + 16.0),
+                            egui::pos2(x, rect.bottom()),
+                        ],
+                        egui::Stroke::new(3.0, selection_accent(ui.visuals())),
                     );
                     if ui.input(|i| i.pointer.any_released())
                         && egui::DragAndDrop::take_payload::<usize>(ui.ctx()).is_some()

@@ -45,6 +45,7 @@ The archive bundles PDFium only. The system must provide:
    from 1. Password-protected files ask for the password.
 2. Click a page to select it; Ctrl+click (Cmd+click on macOS) toggles; Shift+click selects a range. Or type page
    numbers in **Pages** and press Enter or **Select**.
+   Ctrl+A (Cmd+A on macOS) selects all pages.
 3. Drag selected pages to reorder them; press Delete or Backspace to remove them.
 4. **Save all as one PDF** writes the grid in its current order. **Save selection** writes only the selected pages.
    **Split** writes one file per page-number group (see below) into a folder you choose. Closing the window with
