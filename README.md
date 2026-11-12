@@ -11,18 +11,19 @@ Get the package for your system from the [Releases](../../releases) page:
 |---------|-----------------------------------------|
 | Windows | `adiutor-pdf-vX.Y.Z-windows-x64.zip`    |
 | macOS   | `adiutor-pdf-vX.Y.Z-macos-universal.zip` (Intel and Apple Silicon) |
-| Linux   | `adiutor-pdf-vX.Y.Z-linux-x86_64.AppImage` |
+| Linux   | `adiutor-pdf-vX.Y.Z-linux-x86_64.tar.gz` |
 
 ### First launch (builds are not code-signed)
 
 - **Windows:** unzip, run `adiutor-pdf.exe`. If SmartScreen appears: **More info -> Run anyway**.
 - **macOS:** unzip, then right-click `adiutor-pdf.app` -> **Open** -> Open. Or: System Settings -> Privacy &
   Security -> **Open Anyway**.
-- **Linux:** `chmod +x adiutor-pdf-*.AppImage`, then run it.
+- **Linux:** extract the archive (`tar -xzf adiutor-pdf-*.tar.gz`), then run `./adiutor-pdf` in the extracted
+  folder.
 
 ### Linux requirements
 
-The AppImage bundles PDFium only. The system must provide:
+The archive bundles PDFium only. The system must provide:
 
 - OpenGL 2 or newer
 - `libxkbcommon-x11` (X11 sessions)
@@ -31,9 +32,10 @@ The AppImage bundles PDFium only. The system must provide:
 
 ### macOS notes
 
-- Choosing Quit from the Dock, or logging out with the app open, closes it **without** the
-  unsaved-changes prompt (a limitation of winit 0.30, the windowing library). Cmd+Q and the window's close button
-  do show the prompt.
+- Cmd+Q, the window's close button, Quit from the Dock and logging out all show the unsaved-changes prompt.
+  If the app is hidden or minimized when the Dock quit arrives, it comes to the front (or its Dock icon
+  bounces) so the prompt is seen. Cancelling it during a logout stops the logout (macOS reports that
+  adiutor-pdf interrupted it); after "Close anyway", start the logout again.
 - The default macOS app menu (Hide, About, ...) is intentionally turned off, so that Cmd+Q reaches the app and
   goes through the unsaved-changes prompt.
 
@@ -66,7 +68,7 @@ cargo run --release
 ```
 
 `ADIUTOR_PDFIUM_DIR` names the folder holding the PDFium library. Without it the app looks next to the
-executable, in `../Frameworks` and `../lib`, then in the system library path.
+executable, in `../Frameworks` (macOS app bundle), then in the system library path.
 
 ## Making a release
 
@@ -75,7 +77,25 @@ executable, in `../Frameworks` and `../lib`, then in the system library path.
    release or tag does not exist yet).
 3. Review the draft on the Releases page, then **Publish**. Publishing creates the tag.
 
-## License
+## Licenses
 
-Dual-licensed under either of [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE), at your option. Release
-packages also include PDFium and its third-party licenses in `licenses/pdfium/`.
+adiutor-pdf is dual-licensed under either of [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE), at your option.
+
+Release packages include the licenses of the third-party software they contain, in the `licenses/` folder:
+
+- Rust crates compiled into the program: `licenses/THIRD-PARTY-LICENSES.html`. The Rust standard library is
+  dual-licensed under MIT or Apache-2.0.
+- PDFium and the libraries bundled with it: `licenses/pdfium/`.
+- Fonts embedded by egui: `licenses/fonts/` — Ubuntu Light (Ubuntu Font Licence 1.0), Hack (MIT and Bitstream
+  Vera License), Noto Emoji (SIL Open Font License 1.1) and emoji-icon-font (MIT).
+
+The Linux build contains code generated from KDE Plasma Wayland protocol definitions, some of which are licensed
+under LGPL-2.1-or-later (through the crate `wayland-protocols-plasma`, used by the windowing library). The Linux
+package includes the license, a notice and the complete `wayland-protocols-plasma` crate with these protocol files
+in `licenses/lgpl/`. The complete source of adiutor-pdf is in this repository and attached to each release. To
+rebuild with modified protocol files, follow "Build from source" and point a `[patch.crates-io]` entry in
+`Cargo.toml` at the modified crate folder (see `licenses/lgpl/NOTICE.txt`).
+
+This software is based in part on the work of the Independent JPEG Group.
+
+Portions of this software are copyright © 2026 The FreeType Project (www.freetype.org). All rights reserved.

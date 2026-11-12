@@ -45,8 +45,35 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "create=$create" >> "$GITHUB_OUTPUT"
 
+  # Third-party notices shared by all packages: Rust crate licenses (cargo-about) and egui's font licenses.
+  notices:
+    needs: check
+    if: needs.check.outputs.create == 'true'
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: "1.95"
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - name: Generate notices
+        run: |
+          cargo install --locked cargo-about --version 0.9.3 --features cli
+          mkdir -p notices/fonts
+          bash scripts/third-party-licenses.sh notices/THIRD-PARTY-LICENSES.html
+          crate=$(cargo metadata --locked --format-version 1 |
+            jq -er '.packages[] | select(.name == "epaint_default_fonts") | .manifest_path')
+          fonts="$(dirname "$crate")/fonts"
+          cp "$fonts/OFL.txt" "$fonts/UFL.txt" "$fonts/Hack-Regular.txt" \
+            "$fonts/emoji-icon-font-mit-license.txt" "$fonts/egui-icons.txt" notices/fonts/
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: notices
+          path: notices/
+          if-no-files-found: error
+
   windows:
-    needs: [check, ci]
+    needs: [check, ci, notices]
     if: needs.check.outputs.create == 'true'
     runs-on: windows-latest
     env:
@@ -57,6 +84,10 @@ jobs:
         with:
           toolchain: "1.95"
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: notices
+          path: notices
       - name: Build
         shell: bash
         run: |
@@ -66,6 +97,7 @@ jobs:
           mkdir -p "$pkg/licenses/pdfium"
           cp target/release/adiutor-pdf.exe pdfium/bin/pdfium.dll LICENSE-MIT LICENSE-APACHE "$pkg/"
           cp pdfium/LICENSE pdfium/licenses/* "$pkg/licenses/pdfium/"
+          cp -R notices/. "$pkg/licenses/"
       # Puts dumpbin on PATH.
       - uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
       - name: Check the exe needs no VC++ runtime
@@ -85,7 +117,7 @@ jobs:
           path: adiutor-pdf-v${{ needs.check.outputs.version }}-windows-x64.zip
 
   macos:
-    needs: [check, ci]
+    needs: [check, ci, notices]
     if: needs.check.outputs.create == 'true'
     runs-on: macos-latest
     env:
@@ -97,6 +129,10 @@ jobs:
           toolchain: "1.95"
           targets: x86_64-apple-darwin,aarch64-apple-darwin
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: notices
+          path: notices
       - name: Build universal app
         run: |
           cargo build --release --target x86_64-apple-darwin
@@ -114,7 +150,11 @@ jobs:
           cp packaging/macos/Info.plist "$app/Info.plist"
           plutil -replace CFBundleShortVersionString -string "$VERSION" "$app/Info.plist"
           plutil -replace CFBundleVersion -string "$VERSION" "$app/Info.plist"
+          # Only the arm64 notices are shipped; fail if the x64 ones ever differ.
+          diff -r pdfium-x64/licenses pdfium-arm64/licenses
+          cmp pdfium-x64/LICENSE pdfium-arm64/LICENSE
           cp pdfium-arm64/LICENSE pdfium-arm64/licenses/* licenses/pdfium/
+          cp -R notices/. licenses/
           # Ad-hoc signature so Apple Silicon allows launching the app.
           codesign --force --deep -s - adiutor-pdf.app
           pkg="adiutor-pdf-v$VERSION-macos-universal"
@@ -127,42 +167,54 @@ jobs:
           path: adiutor-pdf-v${{ needs.check.outputs.version }}-macos-universal.zip
 
   linux:
-    needs: [check, ci]
+    needs: [check, ci, notices]
     if: needs.check.outputs.create == 'true'
     runs-on: ubuntu-22.04
     env:
       VERSION: ${{ needs.check.outputs.version }}
-      # Upstream publishes no checksum; this is the sha256 of the 1.9.1 asset when pinned.
-      APPIMAGETOOL_URL: https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage
-      APPIMAGETOOL_SHA256: ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
           toolchain: "1.95"
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: notices
+          path: notices
       - name: Install Linux dev packages
         run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev
-      - name: Build AppImage
+      - name: Build tar.gz
         run: |
           cargo build --release
           bash scripts/fetch-pdfium.sh linux-x64 pdfium
-          curl -fsSL -o appimagetool "$APPIMAGETOOL_URL"
-          echo "$APPIMAGETOOL_SHA256  appimagetool" | sha256sum -c -
-          chmod +x appimagetool
-          d=AppDir
-          mkdir -p $d/usr/bin $d/usr/lib $d/licenses/pdfium
-          cp target/release/adiutor-pdf $d/usr/bin/
-          cp pdfium/lib/libpdfium.so $d/usr/lib/
-          cp packaging/linux/adiutor-pdf.desktop packaging/linux/adiutor-pdf.png $d/
-          cp LICENSE-MIT LICENSE-APACHE $d/licenses/
-          cp pdfium/LICENSE pdfium/licenses/* $d/licenses/pdfium/
-          ln -s usr/bin/adiutor-pdf $d/AppRun
-          ARCH=x86_64 ./appimagetool --appimage-extract-and-run $d "adiutor-pdf-v$VERSION-linux-x86_64.AppImage"
+          pkg="adiutor-pdf-v$VERSION-linux-x86_64"
+          mkdir -p "$pkg/licenses/pdfium"
+          cp target/release/adiutor-pdf pdfium/lib/libpdfium.so packaging/linux/adiutor-pdf.desktop \
+            packaging/linux/adiutor-pdf.png LICENSE-MIT LICENSE-APACHE README.md "$pkg/"
+          cp pdfium/LICENSE pdfium/licenses/* "$pkg/licenses/pdfium/"
+          cp -R notices/. "$pkg/licenses/"
+          # LGPL-2.1 material (Linux only): winit's Wayland backend uses wayland-protocols-plasma.
+          lgpl="$pkg/licenses/lgpl"
+          mkdir -p "$lgpl"
+          cp packaging/licenses/LGPL-2.1.txt packaging/licenses/NOTICE.txt "$lgpl/"
+          plasma=$(cargo metadata --locked --format-version 1 |
+            jq -er '.packages[] | select(.name == "wayland-protocols-plasma") | "\(.version) \(.manifest_path)"')
+          # NOTICE.txt lists the LGPL files of this exact version.
+          if [ "${plasma%% *}" != 0.3.12 ]; then
+            echo "wayland-protocols-plasma is ${plasma%% *}: update packaging/licenses/NOTICE.txt" >&2
+            exit 1
+          fi
+          # The whole crate (manifest, code, protocol XML, licenses), usable as a [patch.crates-io] path.
+          crate="$(dirname "${plasma#* }")"
+          [ "$(find "$crate/plasma-wayland-protocols" -name '*.xml' | wc -l)" -gt 0 ]
+          cp -R "$crate" "$lgpl/wayland-protocols-plasma-${plasma%% *}"
+          rm -f "$lgpl/wayland-protocols-plasma-${plasma%% *}/.cargo-ok"
+          tar --owner=0 --group=0 -czf "$pkg.tar.gz" "$pkg"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: linux
-          path: adiutor-pdf-v${{ needs.check.outputs.version }}-linux-x86_64.AppImage
+          path: adiutor-pdf-v${{ needs.check.outputs.version }}-linux-x86_64.tar.gz
 
   release:
     needs: [check, ci, windows, macos, linux]
@@ -177,6 +229,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.check.outputs.version }}
           GH_REPO: ${{ github.repository }}
+        # dist also holds the notices artifact; attach only the packages.
         run: |
           gh release create "v$VERSION" --draft --target "$GITHUB_SHA" \
-            --title "adiutor-pdf v$VERSION" --generate-notes dist/*
+            --title "adiutor-pdf v$VERSION" --generate-notes dist/adiutor-pdf-*

@@ -56,6 +56,8 @@ pub struct AdiutorApp {
     closing: bool,
     /// The engine thread ended; its error was already shown.
     engine_dead: bool,
+    #[cfg(target_os = "macos")]
+    quit_events: crate::macos::QuitEvents,
 }
 
 fn range_error_text(tr: &Tr, e: &RangeError) -> String {
@@ -127,6 +129,8 @@ impl AdiutorApp {
             pending_overwrite: None,
             closing: false,
             engine_dead: false,
+            #[cfg(target_os = "macos")]
+            quit_events: crate::macos::QuitEvents::install(ctx),
         };
         for path in startup_paths {
             app.open(path);
@@ -690,10 +694,44 @@ impl AdiutorApp {
     }
 }
 
+impl AdiutorApp {
+    /// True if closing now would lose something, so the close must be confirmed first.
+    fn needs_close_confirm(&self) -> bool {
+        self.workspace.is_dirty() || self.batch.is_some()
+    }
+}
+
 impl eframe::App for AdiutorApp {
+    // eframe calls `logic` every pass, but `ui` only while the window is visible (not minimized,
+    // hidden or covered), so anything that must work then lives here.
+    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.handle_events(ctx);
+
+        // The default macOS menu is off (see lib.rs), so Cmd+Q arrives here as a key press.
+        #[cfg(target_os = "macos")]
+        if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::Q)) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        }
+        // Quit from the Dock or logout: same path as closing the window, so unsaved changes ask.
+        #[cfg(target_os = "macos")]
+        if self.quit_events.quit_requested() {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            if self.needs_close_confirm() {
+                crate::macos::bring_app_forward();
+            }
+        }
+
+        if ctx.input(|i| i.viewport().close_requested())
+            && !self.closing
+            && self.needs_close_confirm()
+        {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            self.close_prompt = true;
+        }
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
-        self.handle_events(&ctx);
         let dropped: Vec<PathBuf> = ctx.input(|i| {
             i.raw
                 .dropped_files
@@ -703,20 +741,6 @@ impl eframe::App for AdiutorApp {
         });
         for path in dropped {
             self.open(path);
-        }
-
-        // The default macOS menu is off (see lib.rs), so Cmd+Q arrives here as a key press.
-        #[cfg(target_os = "macos")]
-        if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::Q)) {
-            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-        }
-
-        if ctx.input(|i| i.viewport().close_requested())
-            && !self.closing
-            && (self.workspace.is_dirty() || self.batch.is_some())
-        {
-            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-            self.close_prompt = true;
         }
 
         let modal_open =

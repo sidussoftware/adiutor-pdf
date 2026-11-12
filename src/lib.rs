@@ -3,6 +3,8 @@
 pub mod batch;
 pub mod engine;
 pub mod i18n;
+#[cfg(target_os = "macos")]
+mod macos;
 pub mod pdfium_lib;
 pub mod ranges;
 pub mod thumb_cache;

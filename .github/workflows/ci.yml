@@ -40,3 +40,11 @@ jobs:
       - run: cargo fmt --check
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo test
+      # Fails when a dependency's license is not accepted in about.toml or a clarified copyright line is
+      # missing (scripts/third-party-licenses.sh). The about.toml targets cover all
+      # platforms, so one OS is enough; rust-cache keeps the installed cargo-about.
+      - name: Check third-party licenses
+        if: runner.os == 'Linux'
+        run: |
+          cargo install --locked cargo-about --version 0.9.3 --features cli
+          bash scripts/third-party-licenses.sh "$RUNNER_TEMP/THIRD-PARTY-LICENSES.html"

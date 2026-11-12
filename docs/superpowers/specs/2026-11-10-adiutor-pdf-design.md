@@ -206,6 +206,8 @@ On every push and pull request, on Windows, macOS and Linux:
 - `cargo fmt --check`
 - `cargo clippy -- -D warnings`
 - `cargo test`, with PDFium downloaded from `bblanchon/pdfium-binaries` at a **pinned** version.
+- `scripts/third-party-licenses.sh` (cargo-about, Linux only): fails when a dependency's license is not accepted
+  in `about.toml` or a clarified copyright line is missing.
 
 ### Release (`.github/workflows/release.yml`)
 
@@ -213,17 +215,23 @@ On every push and pull request, on Windows, macOS and Linux:
 - Reads `version` from `Cargo.toml`. If no release or tag `v<version>` exists yet, it builds all packages and
   creates a **draft GitHub Release** `v<version>` with the packages attached. If it already exists, it does nothing.
 - The owner reviews the draft and publishes it manually. The tag `v<version>` is created on publish.
-- Packages, each including the project licenses and the PDFium license notices:
+- Packages, each including the project licenses and the third-party notices (Rust crates via cargo-about, PDFium,
+  fonts) in `licenses/`:
   - Windows x86-64: `.zip` with the `.exe` and `pdfium.dll`.
   - macOS **universal** (x86-64 + Apple Silicon): `.zip` with the `.app` bundle containing the universal PDFium
     library.
-  - Linux x86-64: AppImage, built on the oldest available Ubuntu runner for broad glibc compatibility.
+  - Linux x86-64: `.tar.gz` with one folder holding the executable and `libpdfium.so`, built on the oldest
+    available Ubuntu runner for broad glibc compatibility.
+    Changed in v0.1.2: Linux ships as .tar.gz (the AppImage runtime embeds LGPL libfuse).
+    It also carries `licenses/lgpl/` (LGPL-2.1 text, NOTICE.txt, the complete `wayland-protocols-plasma` crate)
+    for the LGPL-2.1-or-later KDE protocol definitions that winit's Wayland backend compiles in through that crate.
 - Builds are unsigned. The README explains how to get past the Windows SmartScreen and macOS Gatekeeper warnings.
 
 ## 10. Repository layout
 
 ```
 Cargo.toml
+about.toml, about.hbs   (cargo-about: third-party notices)
 src/
   main.rs
   ui.rs

@@ -1,0 +1,65 @@
+adiutor-pdf for Linux: LGPL-2.1-or-later notice
+================================================
+
+The Linux build of adiutor-pdf contains code generated at build time from KDE
+Plasma Wayland protocol definitions (XML files), through the Rust crate
+wayland-protocols-plasma 0.3.12. The windowing library (winit) uses these
+definitions in its Wayland backend. The Windows and macOS builds do not
+contain this code.
+
+Some of these protocol definitions are licensed under the GNU Lesser General
+Public License, version 2.1 or (at your option) any later version
+(LGPL-2.1-or-later). The license text is in LGPL-2.1.txt in this folder.
+
+LGPL-2.1-or-later files and their copyright holders (SPDX-FileCopyrightText),
+in wayland-protocols-plasma-0.3.12/plasma-wayland-protocols/src/protocols/:
+
+  appmenu.xml                        2017 David Edmundson
+  blur.xml                           2015 Martin Gräßlin; 2015 Marco Martin
+  contrast.xml                       2015 Martin Gräßlin; 2015 Marco Martin
+  dpms.xml                           2015 Martin Gräßlin
+  fake-input.xml                     2015 Martin Gräßlin
+  idle.xml                           2015 Martin Gräßlin
+  kde-lockscreen-overlay-v1.xml      2022 Aleix Pol Gonzalez <aleixpol@kde.org>
+  keystate.xml                       2019 Aleix Pol Gonzalez <aleixpol@kde.org>
+  org-kde-plasma-virtual-desktop.xml 2018 Marco Martin
+  plasma-shell.xml                   2013-2014 Pier Luigi Fiorini
+  plasma-window-management.xml       2013-2014 Pier Luigi Fiorini
+  remote-access.xml                  2016 Oleg Chernovskiy
+  server-decoration-palette.xml      2017 David Edmundson
+  server-decoration.xml              2015 Martin Gräßlin
+  shadow.xml                         2015 Martin Gräßlin
+  slide.xml                          2015 Martin Gräßlin; 2015 Marco Martin
+  zkde-screencast-unstable-v1.xml    2020-2021 Aleix Pol Gonzalez <aleixpol@kde.org>
+
+The other protocol files of the crate are under MIT-CMU, MIT or BSD-3-Clause,
+as stated in each file's header (fullscreen-shell.xml has no license header).
+Their license texts are in
+wayland-protocols-plasma-0.3.12/plasma-wayland-protocols/LICENSES/.
+
+Source of the protocol definitions
+----------------------------------
+
+The complete wayland-protocols-plasma 0.3.12 crate, as published on
+crates.io, is included in the wayland-protocols-plasma-0.3.12/ folder next to
+this notice: its Cargo.toml, its Rust code and all bundled protocol XML files
+with their licenses. The XML files are the complete source of the
+LGPL-2.1-or-later material in this program. They are also available from
+crates.io (crate wayland-protocols-plasma) and from
+https://invent.kde.org/libraries/plasma-wayland-protocols.
+
+Modifying and rebuilding
+------------------------
+
+The complete source code of adiutor-pdf for this version, including Cargo.lock
+(which pins every dependency), is attached to the same GitHub Release as
+"Source code" and is available at https://github.com/sidussoftware/adiutor-pdf.
+You may modify the protocol files and rebuild the program with your changes:
+follow "Build from source" in README.md, and point Cargo at your modified copy
+of the crate folder by adding to adiutor-pdf's Cargo.toml:
+
+  [patch.crates-io]
+  wayland-protocols-plasma = { path = "<path to>/wayland-protocols-plasma-0.3.12" }
+
+As LGPL-2.1 section 6 requires, you may modify this program for your own use
+and reverse engineer it to debug such modifications.
