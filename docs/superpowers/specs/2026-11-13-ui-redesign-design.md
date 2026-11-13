@@ -1,6 +1,6 @@
 # UI redesign (direction B) and persistent settings — design
 
-Date: 2026-11-13. Status: draft, awaiting owner approval. Size: project.
+Date: 2026-11-13. Status: awaiting owner approval (builder check done). Size: project.
 Prototypes: the owner's Design canvas "adiutor-pdf UI prototypes", boards "B · Barra laterale documenti",
 "B · tema scuro" and "B · nessun documento aperto".
 
@@ -29,7 +29,7 @@ from, which helps when merging. It must still run on ~2015 hardware.
 - An icon font or icon library.
 
 ## Anti-goals (this would be a failure even if it "works")
-- Selection, document identity or button state shown by colour alone.
+- Selection, document identity or button state shown by colour alone (documents carry letters, see below).
 - Continuous repainting: idle CPU must stay about 0%.
 - A settings file problem that blocks the app or loses the user's work.
 - Breaking any v0.1.x guarantee: originals never overwritten, split never overwrites, no partial output, the
@@ -96,6 +96,13 @@ from, which helps when merging. It must still run on ~2015 hardware.
 
 ### Documents in the sidebar
 - Documents are listed in the order they were opened.
+- **Every document gets a letter (owner decision)** in opening order: A, B, … Z, then AA, AB, … (spreadsheet
+  style). The letter appears in a small badge in front of the colour swatch in the sidebar row, and in a small tag on
+  the colour strip of each of that document's thumbnails. So the document is identifiable without colour, and with any
+  number of documents.
+- Hovering a thumbnail shows "<file name>, page N", where N is the page number in its source document.
+- Two open files with the same name are told apart in the sidebar by adding their parent folder:
+  "contratto.pdf — Documenti/2025".
 - "N pagine" counts that document's pages **currently in the grid**, so it changes after deletes and moves. Singular
   and plural forms are translated ("1 pagina" / "N pagine", "1 page" / "N pages").
 - A document whose pages were all deleted stays listed with "0 pagine". It is still open, and still protected as an
@@ -107,13 +114,33 @@ from, which helps when merging. It must still run on ~2015 hardware.
 - Each colour appears in two places: the sidebar swatch, and a 4 px strip along the top edge of each of that
   document's thumbnails.
 - Colours are chosen to stay distinguishable for common colour-vision deficiencies, with lightness spread as well as
-  hue (an Okabe–Ito-like set). The file name in the sidebar remains the primary identity.
+  hue (an Okabe–Ito-like set). The document letter and the file name are the identity; the colour is an extra cue.
+- The prototype's first two colours are the starting point: light `#2563EB` and `#EA580C`, dark `#60A5FA` and
+  `#FB923C`.
 - Tests check each colour against the sidebar background and against the page (white) at ≥ 3:1, in both themes.
 
 ### Theme and visual style
 - Two hand-tuned `egui::Visuals` (light and dark), built from one palette module.
   - Light theme: the stone neutrals and teal accent of prototype B.
   - Dark theme: warm anthracite with a lighter teal accent, as on the dark board.
+- Prototype values, the starting point (the tests decide where these fail):
+
+  | Role | Light | Dark |
+  |---|---|---|
+  | Window / grid background | `#FAFAF9` | `#1A1918` |
+  | Sidebar background | `#F5F5F4` | `#222120` |
+  | Top bar background | `#FFFFFF` | `#1F1E1D` |
+  | Card / field background | `#FFFFFF` | `#2A2826` |
+  | Border | `#D6D3D1` / `#E7E5E4` | `#57534E` / `#3A3836` |
+  | Text | `#1C1917` | `#F5F5F4` |
+  | Secondary text | `#57534E` | `#A8A29E` |
+  | Accent (primary button, selection) | `#0F766E` | `#2DD4BF` |
+  | On-accent text | `#FFFFFF` | `#042F2E` |
+  | Error toast | — | `#3F1D1D` background, `#FECACA` text |
+
+  For an error toast in the light theme, the builder picks a red pair that passes the tests.
+- Minimum window size 1024×600 (`with_min_inner_size`), so the 264 px sidebar plus the top bar's controls always
+  fit. The ~2015 target laptop (1366×768) is above it.
 - Applied through `ctx.set_theme(ThemePreference::{System, Light, Dark})` together with per-theme visuals, so
   "System" follows the OS live.
 - Style values used everywhere:
@@ -130,6 +157,10 @@ from, which helps when merging. It must still run on ~2015 hardware.
   fallbacks for missing glyphs and emoji.
   - Two static weights, Regular and SemiBold, from the official Inter release: a pinned version, its TTF files and
     OFL.txt committed under `assets/fonts/inter/`, with recorded sha256.
+  - Use Inter 4.1 from github.com/rsms/inter releases (the zip's static TTFs). It is fetched once at development
+    time, like PDFium; the app itself stays offline.
+  - The packages get the font licence through `.github/workflows/release.yml`, which already copies
+    `licenses/fonts/`. Add Inter's OFL.txt there as `Inter-OFL.txt`.
   - SemiBold is a named family used for the app name, headings and the primary button.
   - This adds roughly 0.6–0.8 MB to the binary.
 - `src/icons.rs` holds small functions that draw stroke icons with the egui painter: plus, split (scissors), save
@@ -137,8 +168,8 @@ from, which helps when merging. It must still run on ~2015 hardware.
   - Each takes a rect and a colour and is decorative; its button always has a text label.
 
 ### Notifications (toasts)
-- They stack in the top-right corner of the central area, newest on top, at most 5 visible. Older ones are dropped
-  from view; errors are still also logged to stderr.
+- They stack in the top-right corner of the central area, newest on top. Nothing is ever dropped. When the stack is
+  taller than half the central area, it becomes a scrollable list of that height. Errors are also logged to stderr.
 - Success messages ("Salvato …", "Creati N file …") disappear after 5 s. Errors stay until closed.
 - Every toast has a close button ("Chiudi messaggio" for screen readers).
 - Each message keeps its `(key, args)` form, so it is translated when drawn and follows a language switch.
@@ -166,6 +197,8 @@ from, which helps when merging. It must still run on ~2015 hardware.
   - an unreadable or invalid file also gives the defaults, plus one `eprintln!`, and the file is left untouched.
 - `fn save_to(path: &Path, s: &Settings) -> std::io::Result<()>`: creates the folder, writes a temp file in it, then
   renames it over `settings.toml`.
+- If the file failed to parse at load, the first save renames it to `settings.toml.bak` before writing, so a
+  hand-edited file is never silently lost.
 - `fn config_path() -> Option<PathBuf>` resolves the location without any new crate:
   - Windows: `%APPDATA%\adiutor-pdf\settings.toml`;
   - macOS: `$HOME/Library/Application Support/adiutor-pdf/settings.toml`;
@@ -211,7 +244,7 @@ from, which helps when merging. It must still run on ~2015 hardware.
 - i18n: the existing key and placeholder parity tests cover the new keys, plus a test for the page-count
   singular/plural choice.
 - kittest:
-  - the sidebar lists two documents with their counts;
+  - the sidebar lists two documents with their letters and counts;
   - the empty state shows the drop panel;
   - the theme combo switches the visuals.
 - Manual, under Xvfb, with screenshots compared to the three prototype boards:
@@ -220,6 +253,17 @@ from, which helps when merging. It must still run on ~2015 hardware.
   - the progress card;
   - the settings file written and reloaded after a restart.
 - Manual on real machines (owner): the checklist gains sidebar, theme, persistence and font checks.
+
+## Calls made by the designer (owner may revise)
+- Version 0.2.0.
+- Palette starting values as above.
+- Inter 4.1.
+- Minimum window size 1024×600.
+- The toast stack never drops anything and scrolls past half the central area.
+- A corrupt settings file is backed up as `.bak`.
+- The thumbnail hover tooltip shows "<file name>, page N".
+- Same-name files are disambiguated by their parent folder.
+- Letters run in spreadsheet style.
 
 ## Left to the builder
 - Exact palette values, within the contrast tests and close to the prototype.
