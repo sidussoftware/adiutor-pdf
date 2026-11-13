@@ -21,7 +21,7 @@ impl AdiutorApp {
     fn toolbar_contents(&mut self, ui: &mut egui::Ui) {
         let pal = palette(ui);
         ui.horizontal(|ui| {
-            ui.label(self.tr.t("toolbar.pages"));
+            let label = ui.label(self.tr.t("toolbar.pages"));
             let red = ui.visuals().error_fg_color;
             let stroke = if self.pages_error.is_some() {
                 egui::Stroke::new(1.5, red)
@@ -34,7 +34,8 @@ impl AdiutorApp {
                 .show(ui, |ui| {
                     ui.add(egui::TextEdit::singleline(&mut self.pages_text).desired_width(140.0))
                 })
-                .inner;
+                .inner
+                .labelled_by(label.id);
             if edit.changed() {
                 self.pages_error = None;
             }
@@ -52,33 +53,39 @@ impl AdiutorApp {
             let any = !self.workspace.is_empty();
             let sel = self.workspace.has_selection();
             let enabled = |on: bool| idle && on;
-            let btn = |ui: &mut egui::Ui, on: bool, icon: IconFn, text: &str| {
+            let btn = |ui: &mut egui::Ui, on: bool, icon: IconFn, text: egui::RichText| {
                 icons::button(ui, enabled(on), icon, text).clicked()
             };
             // Right to left: the primary action is added first, so it sits at the far right.
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let primary = ui
                     .scope(|ui| {
-                        let v = ui.visuals_mut();
-                        v.override_text_color = Some(pal.on_accent);
-                        for w in [
-                            &mut v.widgets.inactive,
-                            &mut v.widgets.hovered,
-                            &mut v.widgets.active,
-                        ] {
-                            w.weak_bg_fill = pal.accent;
-                            w.fg_stroke.color = pal.on_accent;
-                        }
-                        btn(ui, any, icons::save, self.tr.t("action.save_all"))
+                        style::primary(ui, &pal);
+                        btn(
+                            ui,
+                            any,
+                            icons::save,
+                            style::primary_text(self.tr.t("action.save_all")),
+                        )
                     })
                     .inner;
                 if primary {
                     self.save(false);
                 }
-                if btn(ui, sel, icons::save, self.tr.t("action.save_selection")) {
+                if btn(
+                    ui,
+                    sel,
+                    icons::save,
+                    egui::RichText::new(self.tr.t("action.save_selection")),
+                ) {
                     self.save(true);
                 }
-                if btn(ui, any, icons::split, self.tr.t("action.split")) {
+                if btn(
+                    ui,
+                    any,
+                    icons::split,
+                    egui::RichText::new(self.tr.t("action.split")),
+                ) {
                     self.split();
                 }
             });

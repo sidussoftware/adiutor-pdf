@@ -122,7 +122,7 @@ impl AdiutorApp {
                 Layout::centered_and_justified(egui::Direction::LeftToRight),
                 |ui| {
                     ui.add(
-                        egui::Button::new(text)
+                        egui::Button::new((icons::glyph(icons::plus), text))
                             .fill(pal.card)
                             .stroke(Stroke::NONE)
                             .corner_radius(8),
@@ -130,18 +130,16 @@ impl AdiutorApp {
                 },
             )
             .inner;
-        dashed_border(ui, r.rect, pal.border_strong);
-        let font = egui::TextStyle::Button.resolve(ui.style());
-        let w = ui
-            .painter()
-            .layout_no_wrap(text.to_string(), font, pal.text)
-            .size()
-            .x;
-        let icon = egui::Rect::from_center_size(
-            egui::pos2(r.rect.center().x - w / 2.0 - 16.0, r.rect.center().y),
-            vec2(16.0, 16.0),
-        );
-        icons::plus(ui.painter(), icon, ui.style().interact(&r).fg_stroke.color);
+        if r.has_focus() {
+            ui.painter().rect_stroke(
+                r.rect,
+                8,
+                Stroke::new(2.0, pal.text),
+                egui::StrokeKind::Inside,
+            );
+        } else {
+            dashed_border(ui, r.rect, pal.border_strong);
+        }
         if r.clicked() {
             self.pick_pdfs();
         }
@@ -165,7 +163,7 @@ impl AdiutorApp {
         // Bottom-up: the theme row first, so Language ends up above it.
         ui.spacing_mut().item_spacing.y = 8.0;
         ui.horizontal(|ui| {
-            ui.add_sized(
+            let label = ui.add_sized(
                 vec2(64.0, 40.0),
                 egui::Label::new(self.tr.t("settings.theme")),
             );
@@ -175,10 +173,12 @@ impl AdiutorApp {
                     for p in [ThemePref::System, ThemePref::Light, ThemePref::Dark] {
                         ui.selectable_value(&mut next.theme, p, self.theme_label(p));
                     }
-                });
+                })
+                .response
+                .labelled_by(label.id);
         });
         ui.horizontal(|ui| {
-            ui.add_sized(
+            let label = ui.add_sized(
                 vec2(64.0, 40.0),
                 egui::Label::new(self.tr.t("settings.language")),
             );
@@ -188,7 +188,9 @@ impl AdiutorApp {
                     for p in LanguagePref::ALL {
                         ui.selectable_value(&mut next.language, p, self.lang_label(p));
                     }
-                });
+                })
+                .response
+                .labelled_by(label.id);
         });
         if next.language != self.settings.language {
             self.tr = Tr::new(next.language.resolve());

@@ -70,17 +70,14 @@ fn empty_state(ui: &mut egui::Ui, tr: &Tr) -> bool {
             ui.label(semibold(tr.t("empty.title"), 20.0).color(pal.text));
             ui.label(egui::RichText::new(tr.t("empty.or")).color(pal.text_secondary));
             ui.scope(|ui| {
-                let v = ui.visuals_mut();
-                v.override_text_color = Some(pal.on_accent);
-                for w in [
-                    &mut v.widgets.inactive,
-                    &mut v.widgets.hovered,
-                    &mut v.widgets.active,
-                ] {
-                    w.weak_bg_fill = pal.accent;
-                    w.fg_stroke.color = pal.on_accent;
-                }
-                clicked = icons::button(ui, true, icons::plus, tr.t("toolbar.add_pdf")).clicked();
+                style::primary(ui, &pal);
+                clicked = icons::button(
+                    ui,
+                    true,
+                    icons::plus,
+                    style::primary_text(tr.t("toolbar.add_pdf")),
+                )
+                .clicked();
             });
             ui.add_space(8.0);
             ui.label(
@@ -360,7 +357,7 @@ mod tests {
         h.run();
         h.get_by_label("Trascina qui i PDF");
         h.get_by_label("oppure");
-        h.get_by_label_contains("Aggiungi PDF");
+        h.get_by_label("Aggiungi PDF");
         h.get_by_label_contains("I file originali non vengono mai modificati");
     }
 }

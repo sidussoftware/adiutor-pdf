@@ -117,6 +117,7 @@ pub fn visuals(p: &Palette, dark: bool) -> egui::Visuals {
     w.inactive.weak_bg_fill = p.card;
     w.hovered.bg_fill = p.sidebar;
     w.hovered.weak_bg_fill = p.sidebar;
+    w.active.bg_stroke = egui::Stroke::new(2.0, p.text);
     w.active.bg_fill = p.border;
     w.active.weak_bg_fill = p.border;
     w.open.bg_fill = p.sidebar;
@@ -168,6 +169,7 @@ mod tests {
             check("success", p.success_text, p.success_bg, 4.5);
             for (i, c) in p.doc_colors.into_iter().enumerate() {
                 check(&format!("doc {i}/sidebar"), c, p.sidebar, 3.0);
+                check(&format!("doc {i}/card"), c, p.card, 3.0);
                 check(&format!("doc {i}/white"), c, Color32::WHITE, 3.0);
             }
         }
