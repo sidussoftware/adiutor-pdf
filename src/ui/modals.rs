@@ -44,7 +44,11 @@ impl AdiutorApp {
             if wrong {
                 ui.colored_label(ui.visuals().error_fg_color, self.tr.t("password.wrong"));
             }
-            let edit = ui.add(egui::TextEdit::singleline(&mut self.password_text).password(true));
+            let edit = ui.add(
+                egui::TextEdit::singleline(&mut self.password_text)
+                    .password(true)
+                    .align(egui::Align2::LEFT_CENTER),
+            );
             ok = edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
             edit.request_focus();
             ui.horizontal(|ui| {
@@ -115,6 +119,27 @@ impl AdiutorApp {
             }
             Some(false) => self.blocked_save = None,
             None => {}
+        }
+    }
+
+    pub(super) fn clear_modal(&mut self, ctx: &egui::Context) {
+        if !self.clear_prompt {
+            return;
+        }
+        let answer = confirm_modal(
+            ctx,
+            &self.tr,
+            "clear",
+            "close.unsaved_title",
+            self.tr.t("clear.unsaved_body"),
+            "clear.confirm",
+        );
+        if let Some(confirmed) = answer {
+            self.clear_prompt = false;
+            // A save may have started meanwhile (keyboard); never clear under it.
+            if confirmed && self.batch.is_none() {
+                self.clear_all();
+            }
         }
     }
 

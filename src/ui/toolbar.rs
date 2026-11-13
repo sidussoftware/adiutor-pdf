@@ -32,7 +32,11 @@ impl AdiutorApp {
                 .stroke(stroke)
                 .corner_radius(3.0)
                 .show(ui, |ui| {
-                    ui.add(egui::TextEdit::singleline(&mut self.pages_text).desired_width(140.0))
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.pages_text)
+                            .desired_width(140.0)
+                            .align(egui::Align2::LEFT_CENTER),
+                    )
                 })
                 .inner
                 .labelled_by(label.id);
