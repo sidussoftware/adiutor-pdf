@@ -283,7 +283,7 @@ impl<W: Fn()> Worker<'_, W> {
             return self.emit(Event::SaveFailed {
                 job,
                 dest,
-                reason: "destination has no file name".into(),
+                reason: "reason.no_file_name".into(),
             });
         };
         let mut tmp_name = OsString::from(".");
@@ -326,21 +326,21 @@ impl<W: Fn()> Worker<'_, W> {
 
     fn check_shutdown(&self) -> Result<(), String> {
         if self.shutdown.load(Ordering::Relaxed) {
-            Err("the app is closing".into())
+            Err("reason.closing".into())
         } else {
             Ok(())
         }
     }
 }
 
-/// Short English reason shown inside a translated message.
+/// Reason shown inside a translated message: a `reason.*` locale key, or OS/PDFium text as is.
 fn reason(e: &PdfiumError) -> String {
     match e {
         PdfiumError::PdfiumLibraryInternalError(PdfiumInternalError::FormatError) => {
-            "not a valid PDF or damaged".into()
+            "reason.not_pdf".into()
         }
         PdfiumError::PdfiumLibraryInternalError(PdfiumInternalError::FileError) => {
-            "cannot read the file".into()
+            "reason.cannot_read".into()
         }
         PdfiumError::IoError(e) => e.to_string(),
         // PdfiumError's Display is multi-line Debug; plain Debug stays on one line.

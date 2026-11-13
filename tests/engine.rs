@@ -189,7 +189,7 @@ fn corrupted_file_fails() {
     std::fs::write(&path, b"not a pdf").unwrap();
     let event = open(&engine, &path, None);
     assert!(
-        matches!(&event, Event::OpenFailed { path: p, reason } if *p == path && reason == "not a valid PDF or damaged"),
+        matches!(&event, Event::OpenFailed { path: p, reason } if *p == path && reason == "reason.not_pdf"),
         "{event:?}"
     );
 }
