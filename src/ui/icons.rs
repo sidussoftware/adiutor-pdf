@@ -76,25 +76,37 @@ pub fn file_add(p: &Painter, rect: Rect, color: Color32) {
     path(p, rect, color, &[(10.0, 14.0), (12.5, 11.5), (15.0, 14.0)]);
 }
 
+type IconFn = fn(&Painter, Rect, Color32);
+
+pub fn glyph<'a>(icon: IconFn) -> eframe::egui::Atom<'a> {
+    // Painted in the button's text colour, so disabled buttons fade it too.
+    eframe::egui::Atom::paint(eframe::egui::Vec2::splat(16.0), move |ui, a| {
+        icon(ui.painter(), a.rect, a.fallback_text_color)
+    })
+}
+
 /// A button with a leading icon and a text label; returns the response of the real egui button.
 pub fn button(
     ui: &mut eframe::egui::Ui,
     enabled: bool,
-    icon: fn(&Painter, Rect, Color32),
-    text: &str,
+    icon: IconFn,
+    text: impl Into<eframe::egui::WidgetText>,
 ) -> eframe::egui::Response {
-    use eframe::egui::{Button, Vec2, vec2};
-    // Three en spaces (about 21 px at 14 pt) leave room for the 16 px icon.
-    let r = ui.add_enabled(
+    use eframe::egui::{Button, vec2};
+    ui.add_enabled(
         enabled,
-        Button::new(format!("\u{2002}\u{2002}\u{2002}{text}")).min_size(vec2(0.0, 40.0)),
-    );
-    let size = Vec2::splat(16.0);
-    let pad = ui.spacing().button_padding.x;
-    let rect = Rect::from_center_size(
-        pos2(r.rect.min.x + pad + size.x / 2.0, r.rect.center().y),
-        size,
-    );
-    icon(ui.painter(), rect, ui.style().interact(&r).fg_stroke.color);
-    r
+        Button::new((glyph(icon), text)).min_size(vec2(0.0, 40.0)),
+    )
+}
+
+/// A frameless 40 px icon-only button; `name` is its accessible name and tooltip.
+pub fn icon_button(ui: &mut eframe::egui::Ui, icon: IconFn, name: &str) -> eframe::egui::Response {
+    use eframe::egui::{Button, Vec2};
+    ui.add(
+        Button::new(glyph(icon))
+            .frame_when_inactive(false)
+            .min_size(Vec2::splat(40.0)),
+    )
+    .accessible_name(name)
+    .on_hover_text(name)
 }
