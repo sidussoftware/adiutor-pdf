@@ -476,14 +476,15 @@ impl eframe::App for AdiutorApp {
             egui::CentralPanel::default().show(ui, |ui| ui.label(text));
             return;
         }
-        self.sidebar(ui);
+        let docs = self.workspace.doc_summaries();
+        self.sidebar(ui, &docs);
         self.toolbar(ui);
         egui::CentralPanel::default().show(ui, |ui| {
             if let Some(e) = &self.pages_error {
                 let text = range_error_text(&self.tr, e);
                 ui.colored_label(ui.visuals().error_fg_color, text);
             }
-            self.grid(ui);
+            self.grid(ui, &docs);
             self.toasts_ui(ui);
         });
         self.password_modal(&ctx);

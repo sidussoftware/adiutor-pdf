@@ -5,7 +5,7 @@ use crate::workspace::DocSummary;
 use egui::{Align, Layout, RichText, Sense, Stroke, vec2};
 use style::palette;
 
-fn semibold(text: impl Into<String>, size: f32) -> RichText {
+pub(super) fn semibold(text: impl Into<String>, size: f32) -> RichText {
     RichText::new(text)
         .family(egui::FontFamily::Name("semibold".into()))
         .size(size)
@@ -72,7 +72,7 @@ pub(super) fn doc_list(ui: &mut egui::Ui, tr: &Tr, docs: &[DocSummary]) {
 }
 
 impl AdiutorApp {
-    pub(super) fn sidebar(&mut self, ui: &mut egui::Ui) {
+    pub(super) fn sidebar(&mut self, ui: &mut egui::Ui, docs: &[DocSummary]) {
         let pal = palette(ui);
         let frame = egui::Frame::new()
             .fill(pal.sidebar)
@@ -89,12 +89,14 @@ impl AdiutorApp {
             .show(ui, |ui| {
                 ui.with_layout(Layout::bottom_up(Align::Min), |ui| {
                     self.settings_combos(ui);
-                    ui.with_layout(Layout::top_down(Align::Min), |ui| self.sidebar_top(ui));
+                    ui.with_layout(Layout::top_down(Align::Min), |ui| {
+                        self.sidebar_top(ui, docs)
+                    });
                 });
             });
     }
 
-    fn sidebar_top(&mut self, ui: &mut egui::Ui) {
+    fn sidebar_top(&mut self, ui: &mut egui::Ui, docs: &[DocSummary]) {
         let pal = palette(ui);
         ui.spacing_mut().item_spacing.y = 16.0;
         ui.label(semibold("adiutor-pdf", 15.0).color(pal.text));
@@ -102,12 +104,11 @@ impl AdiutorApp {
         ui.label(
             semibold(self.tr.t("sidebar.documents").to_uppercase(), 12.0).color(pal.text_secondary),
         );
-        let docs = self.workspace.doc_summaries();
         egui::ScrollArea::vertical()
             .auto_shrink(false)
             .show(ui, |ui| {
                 ui.spacing_mut().item_spacing.y = 0.0;
-                doc_list(ui, &self.tr, &docs);
+                doc_list(ui, &self.tr, docs);
             });
     }
 
@@ -141,10 +142,16 @@ impl AdiutorApp {
             vec2(16.0, 16.0),
         );
         icons::plus(ui.painter(), icon, ui.style().interact(&r).fg_stroke.color);
-        if r.clicked()
-            && let Some(files) = rfd::FileDialog::new()
-                .add_filter("PDF", &["pdf"])
-                .pick_files()
+        if r.clicked() {
+            self.pick_pdfs();
+        }
+    }
+
+    /// Opens the file picker and adds the chosen PDFs; shared by the sidebar and the empty state.
+    pub(super) fn pick_pdfs(&mut self) {
+        if let Some(files) = rfd::FileDialog::new()
+            .add_filter("PDF", &["pdf"])
+            .pick_files()
         {
             for path in files {
                 self.open(path);

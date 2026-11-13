@@ -57,7 +57,6 @@ pub fn save(p: &Painter, rect: Rect, color: Color32) {
 }
 
 /// A page with a folded corner and an up arrow.
-#[expect(dead_code, reason = "used by the empty state")]
 pub fn file_add(p: &Painter, rect: Rect, color: Color32) {
     path(
         p,
