@@ -53,6 +53,10 @@ pub struct AdiutorApp {
     passwords: VecDeque<(PathBuf, bool)>,
     password_text: String,
     close_prompt: bool,
+    /// "Clear all" was pressed with unsaved changes; waiting for confirmation.
+    clear_prompt: bool,
+    /// `CloseAll` was sent and `Cleared` not yet received: events for the old documents are dropped.
+    clearing: bool,
     /// A save to an existing file (name had no ".pdf") waiting for the user's confirmation.
     pending_overwrite: Option<(Vec<PageRef>, PathBuf)>,
     /// `selection_only` of a save the user aimed at an open original.
@@ -137,6 +141,8 @@ impl AdiutorApp {
             passwords: VecDeque::new(),
             password_text: String::new(),
             close_prompt: false,
+            clear_prompt: false,
+            clearing: false,
             pending_overwrite: None,
             blocked_save: None,
             blocked_file: String::new(),
@@ -157,6 +163,19 @@ impl AdiutorApp {
         {
             self.engine_died();
         }
+    }
+
+    /// Removes every document and returns to the empty state; the app stays open.
+    fn clear_all(&mut self) {
+        self.send(Command::CloseAll);
+        self.clearing = self.engine.is_ok() && !self.engine_dead;
+        self.workspace = Workspace::new();
+        self.cache.clear();
+        self.last_visible.clear();
+        self.passwords.clear();
+        self.password_text.clear();
+        self.pages_text.clear();
+        self.pages_error = None;
     }
 
     /// Shows the internal error once, however often the dead engine is used.
@@ -217,7 +236,25 @@ impl AdiutorApp {
                 },
                 Err(_) => return,
             };
+            if self.clearing {
+                match event {
+                    Event::Cleared => self.clearing = false,
+                    // These name documents that CloseAll closed.
+                    Event::Opened { .. }
+                    | Event::Thumbnail { .. }
+                    | Event::PasswordRequired { .. } => {}
+                    other => self.handle_event(ctx, other),
+                }
+            } else {
+                self.handle_event(ctx, event);
+            }
+        }
+    }
+
+    fn handle_event(&mut self, ctx: &egui::Context, event: Event) {
+        {
             match event {
+                Event::Cleared => {}
                 Event::Opened {
                     path,
                     doc,
@@ -490,6 +527,7 @@ impl eframe::App for AdiutorApp {
         self.password_modal(&ctx);
         self.overwrite_modal(&ctx);
         self.blocked_modal(&ctx);
+        self.clear_modal(&ctx);
         self.close_modal(&ctx);
     }
 }

@@ -101,9 +101,23 @@ impl AdiutorApp {
         ui.spacing_mut().item_spacing.y = 16.0;
         ui.label(semibold("adiutor-pdf", 15.0).color(pal.text));
         self.add_button(ui);
-        ui.label(
-            semibold(self.tr.t("sidebar.documents").to_uppercase(), 12.0).color(pal.text_secondary),
-        );
+        ui.horizontal(|ui| {
+            ui.label(
+                semibold(self.tr.t("sidebar.documents").to_uppercase(), 12.0)
+                    .color(pal.text_secondary),
+            );
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                let enabled = !docs.is_empty() && self.batch.is_none();
+                let clear = ui.add_enabled(enabled, egui::Button::new(self.tr.t("sidebar.clear")));
+                if clear.clicked() {
+                    if self.workspace.is_dirty() {
+                        self.clear_prompt = true;
+                    } else {
+                        self.clear_all();
+                    }
+                }
+            });
+        });
         egui::ScrollArea::vertical()
             .auto_shrink(false)
             .show(ui, |ui| {

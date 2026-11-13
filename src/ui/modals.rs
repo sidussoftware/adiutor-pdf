@@ -122,6 +122,27 @@ impl AdiutorApp {
         }
     }
 
+    pub(super) fn clear_modal(&mut self, ctx: &egui::Context) {
+        if !self.clear_prompt {
+            return;
+        }
+        let answer = confirm_modal(
+            ctx,
+            &self.tr,
+            "clear",
+            "close.unsaved_title",
+            self.tr.t("clear.unsaved_body"),
+            "clear.confirm",
+        );
+        if let Some(confirmed) = answer {
+            self.clear_prompt = false;
+            // A save may have started meanwhile (keyboard); never clear under it.
+            if confirmed && self.batch.is_none() {
+                self.clear_all();
+            }
+        }
+    }
+
     pub(super) fn close_modal(&mut self, ctx: &egui::Context) {
         if !self.close_prompt {
             return;

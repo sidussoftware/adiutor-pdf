@@ -66,6 +66,9 @@ Generate a 300-page PDF: `python3 -c "from pypdf import PdfWriter as W; w=W(); [
 
 ## Sidebar and identity
 - [ ] Sidebar (264 px) lists each document with letter (A, B, ... AA after Z), colour, name and page count
+- [ ] **Clear all** (sidebar) is disabled with no documents or while saving; with unsaved changes it asks first (Cancel and Esc keep everything); after clearing, the empty state shows, and newly added files get letter A again with their own thumbnails
+- [ ] Cursor and text are vertically centred in the Pages and password fields
+- [ ] Hovering a button changes its fill and border clearly; Save PDF turns a darker green; the pointer becomes a hand
 - [ ] Thumbnails show the colour strip, letter tag and a 1 px border; hover shows "<file>, page N"
 - [ ] With 27+ documents the letters continue AA, AB; colours repeat but letters stay unique
 - [ ] Document identity is readable without colour (letters and names), also in both themes

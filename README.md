@@ -49,7 +49,8 @@ The archive bundles PDFium only. The system must provide:
 3. Click a page to select it; Ctrl+click (Cmd+click on macOS) toggles; Shift+click selects a range. Or type page
    numbers in **Pages** and press Enter or **Select**.
    Ctrl+A (Cmd+A on macOS) selects all pages.
-4. Drag selected pages to reorder them; press Delete or Backspace to remove them.
+4. Drag selected pages to reorder them; press Delete or Backspace to remove them. **Clear all** in the sidebar
+   removes every document and returns to the empty window (it asks first if there are unsaved changes).
 5. **Save PDF** writes the grid in its current order. **Save selection** writes only the selected pages.
    **Split** writes one file per page-number group (see below) into a folder you choose. Closing the window with
    **Close anyway** during a split keeps the files already written (each one complete) and stops the rest.

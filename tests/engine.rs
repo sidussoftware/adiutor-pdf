@@ -379,3 +379,19 @@ fn dropping_engine_during_save_leaves_no_temp_file() {
         assert_eq!(sizes_of(&dest).len(), 1000, "dest exists but is incomplete");
     }
 }
+
+#[test]
+fn close_all_restarts_doc_ids_and_answers_cleared() {
+    let _serial = serial();
+    let Some(engine) = engine() else { return };
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("a.pdf");
+    make_pdf(&path, &[(100.0, 100.0)]);
+    assert_eq!(open_ok(&engine, &path), 0);
+    assert_eq!(open_ok(&engine, &path), 1);
+    engine
+        .send(Command::CloseAll)
+        .unwrap_or_else(|_| panic!("engine died"));
+    wait_for(&engine, |e| matches!(e, Event::Cleared));
+    assert_eq!(open_ok(&engine, &path), 0);
+}

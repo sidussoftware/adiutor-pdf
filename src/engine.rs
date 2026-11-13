@@ -26,6 +26,9 @@ pub enum Command {
         pages: Vec<PageRef>,
         dest: PathBuf,
     },
+    /// Closes every document and drops pending thumbnails; answered with `Event::Cleared`. DocIds
+    /// start again at 0 for the next `Open`.
+    CloseAll,
 }
 
 #[derive(Debug)]
@@ -64,6 +67,8 @@ pub enum Event {
         dest: PathBuf,
         reason: String,
     },
+    /// Every event sent before this one refers to documents closed by `CloseAll`.
+    Cleared,
 }
 
 /// The worker thread has ended (it panicked or failed to start).
@@ -196,6 +201,11 @@ impl<W: Fn()> Worker<'_, W> {
                 }
                 Some(Command::Open { path, password }) => self.open(path, password),
                 Some(Command::Save { job, pages, dest }) => self.save(job, &pages, dest),
+                Some(Command::CloseAll) => {
+                    pending.clear();
+                    self.docs.clear();
+                    self.emit(Event::Cleared);
+                }
                 None => {
                     let page = pending.pop_front().expect("pending is non-empty here");
                     match self.render(page, width_px) {
