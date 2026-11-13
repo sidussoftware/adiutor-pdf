@@ -35,3 +35,7 @@ close.unsaved_body = There are unsaved changes. Close anyway?
 close.confirm = Close anyway
 error.internal = Internal error, please restart the app
 error.engine_start = Cannot start the PDF engine:\n{reason}
+lang.system = System
+lang.en = English
+lang.it = Italiano
+settings.save_failed = Cannot save settings:\n{reason}

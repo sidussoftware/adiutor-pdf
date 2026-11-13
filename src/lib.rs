@@ -7,13 +7,18 @@ pub mod i18n;
 mod macos;
 pub mod pdfium_lib;
 pub mod ranges;
+pub mod settings;
 pub mod thumb_cache;
 pub mod ui;
 pub mod workspace;
 
 /// Opens the main window and runs the event loop. PDF paths given as arguments are opened at startup.
 pub fn run() -> eframe::Result<()> {
-    let tr = i18n::Tr::new(i18n::Lang::detect());
+    let settings_path = settings::config_path();
+    let loaded = settings_path
+        .as_deref()
+        .map_or_else(settings::Loaded::default, settings::load_from);
+    let tr = i18n::Tr::new(loaded.settings.language.resolve());
     let options = eframe::NativeOptions {
         renderer: eframe::Renderer::Glow,
         viewport: eframe::egui::ViewportBuilder::default()
@@ -35,7 +40,13 @@ pub fn run() -> eframe::Result<()> {
         options,
         Box::new(move |cc| {
             let paths = std::env::args_os().skip(1).map(Into::into).collect();
-            Ok(Box::new(ui::AdiutorApp::new(&cc.egui_ctx, tr, paths)))
+            Ok(Box::new(ui::AdiutorApp::new(
+                &cc.egui_ctx,
+                tr,
+                loaded,
+                settings_path,
+                paths,
+            )))
         }),
     )
 }

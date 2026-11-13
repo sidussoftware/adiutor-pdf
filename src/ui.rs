@@ -2,8 +2,9 @@
 
 use crate::batch::Batch;
 use crate::engine::{Command, Engine, Event};
-use crate::i18n::{Lang, Tr};
+use crate::i18n::Tr;
 use crate::ranges::{self, RangeError};
+use crate::settings::{LanguagePref, Settings};
 use crate::thumb_cache::ThumbCache;
 use crate::workspace::{PageRef, SourceDoc, Workspace, free_split_names, split_stem};
 use eframe::egui::{self, Color32, Sense, TextureHandle, TextureOptions, vec2};
@@ -51,6 +52,10 @@ pub struct AdiutorApp {
     engine: Result<Engine, String>,
     workspace: Workspace,
     tr: Tr,
+    settings: Settings,
+    settings_path: Option<PathBuf>,
+    /// The settings file was unreadable; the first save keeps a `.bak` copy.
+    settings_corrupt: bool,
     cache: ThumbCache<TextureHandle>,
     /// Last set sent with `Command::Visible`, to avoid resending an unchanged set.
     last_visible: Vec<PageRef>,
@@ -130,13 +135,22 @@ fn file_name(path: &Path) -> String {
 }
 
 impl AdiutorApp {
-    pub fn new(ctx: &egui::Context, tr: Tr, startup_paths: Vec<PathBuf>) -> Self {
+    pub fn new(
+        ctx: &egui::Context,
+        tr: Tr,
+        loaded: crate::settings::Loaded,
+        settings_path: Option<PathBuf>,
+        startup_paths: Vec<PathBuf>,
+    ) -> Self {
         let wake_ctx = ctx.clone();
         let engine = Engine::start(move || wake_ctx.request_repaint());
         let mut app = Self {
             engine,
             workspace: Workspace::new(),
             tr,
+            settings: loaded.settings,
+            settings_path,
+            settings_corrupt: loaded.was_corrupt,
             cache: ThumbCache::new(THUMB_CACHE_BYTES),
             last_visible: Vec::new(),
             pixels_per_point: ctx.pixels_per_point(),
@@ -179,10 +193,30 @@ impl AdiutorApp {
         }
     }
 
+    /// Applies and saves new settings; a failed save is reported but the change stays for this run.
+    fn set_settings(&mut self, s: Settings) {
+        self.settings = s;
+        let Some(path) = &self.settings_path else {
+            return;
+        };
+        match crate::settings::save_to(path, &self.settings, self.settings_corrupt) {
+            Ok(()) => self.settings_corrupt = false,
+            Err(e) => self.error("settings.save_failed", vec![("reason", e.to_string())]),
+        }
+    }
+
     fn error(&mut self, key: &'static str, args: Vec<(&'static str, String)>) {
         let message = (key, args);
         eprintln!("{}", message_text(&self.tr, &message));
         self.messages.push(message);
+    }
+
+    fn lang_label(&self, p: LanguagePref) -> &str {
+        match p {
+            LanguagePref::System => self.tr.t("lang.system"),
+            LanguagePref::English => self.tr.t("lang.en"),
+            LanguagePref::Italian => self.tr.t("lang.it"),
+        }
     }
 
     fn open(&mut self, path: PathBuf) {
@@ -442,17 +476,21 @@ impl AdiutorApp {
                 self.split();
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let mut lang = self.tr.lang();
+                let mut pref = self.settings.language;
                 egui::ComboBox::from_id_salt("language")
-                    .selected_text(lang.native_name())
+                    .selected_text(self.lang_label(pref))
                     .show_ui(ui, |ui| {
-                        for l in Lang::ALL {
-                            ui.selectable_value(&mut lang, l, l.native_name());
+                        for p in LanguagePref::ALL {
+                            ui.selectable_value(&mut pref, p, self.lang_label(p));
                         }
                     });
                 ui.label(self.tr.t("toolbar.language"));
-                if lang != self.tr.lang() {
-                    self.tr = Tr::new(lang);
+                if pref != self.settings.language {
+                    self.set_settings(Settings {
+                        language: pref,
+                        ..self.settings.clone()
+                    });
+                    self.tr = Tr::new(pref.resolve());
                     let title = self.tr.t("app.title").to_string();
                     ui.ctx()
                         .send_viewport_cmd(egui::ViewportCommand::Title(title));
@@ -876,6 +914,7 @@ impl eframe::App for AdiutorApp {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::i18n::Lang;
     use egui_kittest::Harness;
     use egui_kittest::kittest::Queryable;
 
