@@ -78,10 +78,16 @@ impl Tr {
             .map_or(key, String::as_str)
     }
 
-    /// Like `t`, replacing each `{name}` placeholder with its value.
+    /// Like `t`, replacing each `{name}` placeholder with its value. A value that is a `reason.*` key
+    /// (the engine's fixed error reasons) is translated too, so it follows a language switch.
     pub fn tf(&self, key: &str, args: &[(&str, &str)]) -> String {
         args.iter()
             .fold(self.t(key).to_string(), |s, (name, value)| {
+                let value = if value.starts_with("reason.") {
+                    self.t(value)
+                } else {
+                    value
+                };
                 s.replace(&format!("{{{name}}}"), value)
             })
     }
@@ -131,5 +137,21 @@ mod tests {
     fn tf_replaces_placeholders() {
         let s = Tr::new(Lang::En).tf("range.out_of_range", &[("page", "12"), ("total", "10")]);
         assert_eq!(s, "Page 12 does not exist (total 10)");
+    }
+
+    #[test]
+    fn tf_translates_engine_reasons_only() {
+        let args = [("file", "a.pdf"), ("reason", "reason.not_pdf")];
+        let s = Tr::new(Lang::It).tf("open.failed", &args);
+        assert_eq!(
+            s,
+            "Impossibile aprire a.pdf: non è un PDF valido o è danneggiato"
+        );
+        // OS text passes through unchanged.
+        let s = Tr::new(Lang::It).tf(
+            "open.failed",
+            &[("file", "a.pdf"), ("reason", "Permission denied")],
+        );
+        assert_eq!(s, "Impossibile aprire a.pdf: Permission denied");
     }
 }

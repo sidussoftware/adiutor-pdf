@@ -112,7 +112,7 @@ dependencies = [
 
 [[package]]
 name = "adiutor-pdf"
-version = "0.1.3"
+version = "0.2.0"
 dependencies = [
  "eframe",
  "egui_kittest",
@@ -121,8 +121,10 @@ dependencies = [
  "objc2-foundation 0.3.2",
  "pdfium-render",
  "rfd",
+ "serde",
  "sys-locale",
  "tempfile",
+ "toml",
  "winit",
 ]
 
@@ -2878,10 +2880,12 @@ version = "1.2.1+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d5755c51863cdac711f1956baf8eb9588e060755f7d3c4c979e70ea1e1f32cd7"
 dependencies = [
+ "indexmap",
  "serde_core",
  "serde_spanned",
  "toml_datetime",
  "toml_parser",
+ "toml_writer",
  "winnow",
 ]
 
@@ -2914,6 +2918,12 @@ checksum = "baa693a8032d7e1cada7d0041e96126df243179ff061456783ac7f12bda4744c"
 dependencies = [
  "winnow",
 ]
+
+[[package]]
+name = "toml_writer"
+version = "1.2.0+spec-1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "009dbb7700f11c55ef83aebbe4c0e9cf1f1ac0844bd8d6f00dc38f302026e13a"
 
 [[package]]
 name = "tracing"
