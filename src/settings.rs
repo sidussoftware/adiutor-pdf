@@ -57,10 +57,13 @@ pub struct Loaded {
 
 pub fn load_from(path: &Path) -> Loaded {
     let parsed = match std::fs::read_to_string(path) {
-        Ok(text) => toml::from_str(&text).map_err(|_| ()),
+        Ok(text) => toml::from_str(&text).map_err(|e| e.to_string()),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Settings::default()),
-        Err(_) => Err(()),
+        Err(e) => Err(e.to_string()),
     };
+    if let Err(e) = &parsed {
+        eprintln!("settings: ignoring {}: {e}", path.display());
+    }
     Loaded {
         was_corrupt: parsed.is_err(),
         settings: parsed.unwrap_or_default(),
@@ -78,23 +81,26 @@ pub fn save_to(path: &Path, s: &Settings, backup_corrupt: bool) -> std::io::Resu
     }
     let text = toml::to_string_pretty(s).map_err(std::io::Error::other)?;
     let tmp = dir.join(".settings.toml.tmp");
-    std::fs::write(&tmp, text)?;
+    std::fs::write(&tmp, text).inspect_err(|_| {
+        let _ = std::fs::remove_file(&tmp);
+    })?;
     std::fs::rename(&tmp, path).inspect_err(|_| {
         let _ = std::fs::remove_file(&tmp);
     })
 }
 
 pub fn config_path() -> Option<PathBuf> {
-    config_path_from(|k| std::env::var(k).ok().filter(|v| !v.is_empty()))
+    config_path_from(|k| std::env::var(k).ok())
 }
 
 fn config_path_from(get: impl Fn(&str) -> Option<String>) -> Option<PathBuf> {
+    let get = |k: &str| get(k).filter(|v| !v.is_empty());
     #[cfg(target_os = "windows")]
     let base = PathBuf::from(get("APPDATA")?);
     #[cfg(target_os = "macos")]
     let base = PathBuf::from(get("HOME")?).join("Library/Application Support");
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-    let base = match get("XDG_CONFIG_HOME") {
+    let base = match get("XDG_CONFIG_HOME").filter(|x| Path::new(x).is_absolute()) {
         Some(x) => PathBuf::from(x),
         None => PathBuf::from(get("HOME")?).join(".config"),
     };
@@ -171,6 +177,16 @@ mod tests {
     }
 
     #[test]
+    fn save_fails_when_parent_is_a_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let f = dir.path().join("f");
+        std::fs::write(&f, "x").unwrap();
+        assert!(save_to(&f.join("settings.toml"), &italian(), false).is_err());
+        assert!(!dir.path().join(".settings.toml.tmp").exists());
+        assert!(!f.join(".settings.toml.tmp").exists());
+    }
+
+    #[test]
     fn corrupt_file_backed_up_on_first_save() {
         let dir = tempfile::tempdir().unwrap();
         let p = dir.path().join("settings.toml");
@@ -203,6 +219,16 @@ mod tests {
             Some(PathBuf::from("/h/.config/adiutor-pdf/settings.toml"))
         );
         assert_eq!(config_path_from(env(&[])), None);
+        let rel = env(&[("XDG_CONFIG_HOME", "rel"), ("HOME", "/h")]);
+        assert_eq!(
+            config_path_from(rel),
+            Some(PathBuf::from("/h/.config/adiutor-pdf/settings.toml"))
+        );
+        let empty = env(&[("XDG_CONFIG_HOME", ""), ("HOME", "/h")]);
+        assert_eq!(
+            config_path_from(empty),
+            Some(PathBuf::from("/h/.config/adiutor-pdf/settings.toml"))
+        );
     }
 
     #[test]

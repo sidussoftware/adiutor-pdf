@@ -53,7 +53,7 @@ pub fn run() -> eframe::Result<()> {
         renderer: eframe::Renderer::Glow,
         viewport: eframe::egui::ViewportBuilder::default()
             .with_title(tr.t("app.title"))
-            .with_inner_size([1000.0, 700.0])
+            .with_inner_size([1280.0, 800.0])
             .with_min_inner_size([1024.0, 600.0])
             .with_maximized(true)
             .with_drag_and_drop(true),
