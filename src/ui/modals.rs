@@ -44,7 +44,11 @@ impl AdiutorApp {
             if wrong {
                 ui.colored_label(ui.visuals().error_fg_color, self.tr.t("password.wrong"));
             }
-            let edit = ui.add(egui::TextEdit::singleline(&mut self.password_text).password(true));
+            let edit = ui.add(
+                egui::TextEdit::singleline(&mut self.password_text)
+                    .password(true)
+                    .align(egui::Align2::LEFT_CENTER),
+            );
             ok = edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
             edit.request_focus();
             ui.horizontal(|ui| {
