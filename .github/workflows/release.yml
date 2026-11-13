@@ -43,7 +43,7 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "create=$create" >> "$GITHUB_OUTPUT"
 
-  # Third-party notices shared by all packages: Rust crate licenses (cargo-about) and egui's font licenses.
+  # Third-party notices shared by all packages: Rust crate licenses (cargo-about) and egui's and Inter's font licenses.
   notices:
     needs: check
     if: needs.check.outputs.create == 'true'
@@ -64,6 +64,7 @@ jobs:
           fonts="$(dirname "$crate")/fonts"
           cp "$fonts/OFL.txt" "$fonts/UFL.txt" "$fonts/Hack-Regular.txt" \
             "$fonts/emoji-icon-font-mit-license.txt" "$fonts/egui-icons.txt" notices/fonts/
+          cp assets/fonts/inter/OFL.txt notices/fonts/Inter-OFL.txt
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: notices

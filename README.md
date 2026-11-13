@@ -43,13 +43,31 @@ The archive bundles PDFium only. The system must provide:
 
 1. **Add PDF** (or drop files on the window, or pass them as arguments). All pages appear in one grid, numbered
    from 1. Password-protected files ask for the password.
-2. Click a page to select it; Ctrl+click (Cmd+click on macOS) toggles; Shift+click selects a range. Or type page
+2. The sidebar on the left lists the open documents with a letter (A, B, ... AA), a colour and the page count.
+   Each thumbnail shows its document's colour strip and letter; hover it to see "<file>, page N". Letters and
+   colours are never the only cue: the file name is always available.
+3. Click a page to select it; Ctrl+click (Cmd+click on macOS) toggles; Shift+click selects a range. Or type page
    numbers in **Pages** and press Enter or **Select**.
    Ctrl+A (Cmd+A on macOS) selects all pages.
-3. Drag selected pages to reorder them; press Delete or Backspace to remove them.
-4. **Save all as one PDF** writes the grid in its current order. **Save selection** writes only the selected pages.
+4. Drag selected pages to reorder them; press Delete or Backspace to remove them.
+5. **Save PDF** writes the grid in its current order. **Save selection** writes only the selected pages.
    **Split** writes one file per page-number group (see below) into a folder you choose. Closing the window with
    **Close anyway** during a split keeps the files already written (each one complete) and stops the rest.
+   A progress card shows while saving; results appear as notices at the top right (success notices close after
+   5 seconds, errors stay until you close them).
+
+The window has a minimum size of 1024x600.
+
+### Language and theme
+
+Choose the language (System, English, Italiano) and the theme (System, Light, Dark) in the interface. Both are
+remembered between launches in `settings.toml` in the per-user config folder:
+
+- Windows: `%APPDATA%\adiutor-pdf\settings.toml`
+- macOS: `~/Library/Application Support/adiutor-pdf/settings.toml`
+- Linux: `$XDG_CONFIG_HOME/adiutor-pdf/settings.toml`, or `~/.config/adiutor-pdf/settings.toml`
+
+If the file is unreadable it is ignored, and the app starts with defaults and keeps a copy as `settings.toml.bak` before the next save.
 
 ### Page numbers
 
@@ -87,6 +105,7 @@ Release packages include the licenses of the third-party software they contain, 
 - Rust crates compiled into the program: `licenses/THIRD-PARTY-LICENSES.html`. The Rust standard library is
   dual-licensed under MIT or Apache-2.0.
 - PDFium and the libraries bundled with it: `licenses/pdfium/`.
+- Inter (UI font, SIL Open Font License 1.1): `licenses/fonts/Inter-OFL.txt`.
 - Fonts embedded by egui: `licenses/fonts/` — Ubuntu Light (Ubuntu Font Licence 1.0), Hack (MIT and Bitstream
   Vera License), Noto Emoji (SIL Open Font License 1.1) and emoji-icon-font (MIT).
 

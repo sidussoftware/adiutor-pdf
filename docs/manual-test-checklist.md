@@ -1,6 +1,6 @@
 # Manual test checklist
 
-Tick an item only after doing it on a real build. Tasks 7 and 8 add their checks to the empty sections.
+Tick an item only after doing it on a real build. 
 
 ## Open
 - [x] Pass two PDFs as command-line arguments: all pages appear in order, positions numbered from 1 (Xvfb, release build, screenshot)
@@ -28,7 +28,7 @@ Tick an item only after doing it on a real build. Tasks 7 and 8 add their checks
 - [x] Delete removes the selected pages; Backspace inside the Pages field edits text and deletes no page
 - [ ] Drag to the end of the list and between rows; drag an unselected page (it becomes the selection first)
 ## Save
-- [x] Reorder, then "Save all as one PDF": the output has the pages in the grid order (pypdf page widths [300, 700, 400, 500, 600]) (Xvfb + xdg-desktop-portal-gtk, xdotool, screenshots)
+- [x] Reorder, then "Save PDF": the output has the pages in the grid order (pypdf page widths [300, 700, 400, 500, 600]) (Xvfb + xdg-desktop-portal-gtk, xdotool, screenshots)
 - [x] "Save selection" writes only the selected page; default name is `<first source>_edited.pdf` (Xvfb + xdg-desktop-portal-gtk, xdotool, screenshots)
 - [x] Saving over an open original shows the blocked modal; "Choose another name" reopens the save dialog; the original is unchanged (Xvfb + xdg-desktop-portal-gtk, xdotool, sha256)
 - [x] Messages stack at the bottom and each Close button dismisses its own line
@@ -63,3 +63,29 @@ Generate a 300-page PDF: `python3 -c "from pypdf import PdfWriter as W; w=W(); [
 - [ ] First thumbnails visible after opening the 300-page PDF: stopwatch
 - [ ] Memory with the 300-page PDF loaded: `top` RES / Task Manager / Activity Monitor
 - [x] Idle CPU after loading: `top -b -n 3 -d 1 -p <pid>` showed 0.0% (Xvfb, 12 + 300 pages loaded)
+
+## Sidebar and identity
+- [ ] Sidebar (264 px) lists each document with letter (A, B, ... AA after Z), colour, name and page count
+- [ ] Thumbnails show the colour strip, letter tag and a 1 px border; hover shows "<file>, page N"
+- [ ] With 27+ documents the letters continue AA, AB; colours repeat but letters stay unique
+- [ ] Document identity is readable without colour (letters and names), also in both themes
+
+## Themes
+- [ ] Theme control switches System / Light / Dark immediately; text and borders stay legible in both
+- [ ] System follows the OS light/dark setting
+
+## Remembered settings
+- [ ] Choose Italiano and Dark, quit, relaunch: both are restored
+- [ ] `settings.toml` is in the per-user config folder (Windows `%APPDATA%\adiutor-pdf`, macOS `~/Library/Application Support/adiutor-pdf`, Linux `$XDG_CONFIG_HOME` or `~/.config`)
+- [ ] Corrupt `settings.toml`: app starts with defaults; after changing a setting a `settings.toml.bak` copy exists
+- [ ] Read-only config folder: app still works
+
+## Notices and progress
+- [ ] Success notice appears top right and disappears after about 5 s; error notices stay until closed
+- [ ] Progress card shows while saving a large file; Save PDF / Split are disabled meanwhile
+- [ ] Idle CPU stays about 0% with a notice shown and after it expires
+
+## Empty state and window size
+- [ ] With no documents the drop panel is shown; dropping PDFs on it adds them
+- [ ] The window cannot be resized below 1024x600; the top bar and sidebar stay usable at that size
+- [ ] Top-bar controls are at least 40 px tall and reachable by keyboard (Tab)
