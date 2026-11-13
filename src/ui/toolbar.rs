@@ -2,10 +2,12 @@
 
 use super::*;
 
+type IconFn = fn(&egui::Painter, egui::Rect, egui::Color32);
+
 impl AdiutorApp {
     pub(super) fn toolbar(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
-            if ui.button(self.tr.t("toolbar.add_pdf")).clicked()
+            if icons::button(ui, true, icons::plus, self.tr.t("toolbar.add_pdf")).clicked()
                 && let Some(files) = rfd::FileDialog::new()
                     .add_filter("PDF", &["pdf"])
                     .pick_files()
@@ -45,17 +47,16 @@ impl AdiutorApp {
             let any = !self.workspace.is_empty();
             let sel = self.workspace.has_selection();
             let enabled = |on: bool| idle && on;
-            let btn = |ui: &mut egui::Ui, on: bool, text: &str| {
-                ui.add_enabled(enabled(on), egui::Button::new(text))
-                    .clicked()
+            let btn = |ui: &mut egui::Ui, on: bool, icon: IconFn, text: &str| {
+                icons::button(ui, enabled(on), icon, text).clicked()
             };
-            if btn(ui, any, self.tr.t("action.save_all")) {
+            if btn(ui, any, icons::save, self.tr.t("action.save_all")) {
                 self.save(false);
             }
-            if btn(ui, sel, self.tr.t("action.save_selection")) {
+            if btn(ui, sel, icons::save, self.tr.t("action.save_selection")) {
                 self.save(true);
             }
-            if btn(ui, any, self.tr.t("action.split")) {
+            if btn(ui, any, icons::split, self.tr.t("action.split")) {
                 self.split();
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -69,10 +70,13 @@ impl AdiutorApp {
                     });
                 ui.label(self.tr.t("toolbar.language"));
                 if pref != self.settings.language {
-                    self.set_settings(Settings {
-                        language: pref,
-                        ..self.settings.clone()
-                    });
+                    self.set_settings(
+                        ui.ctx(),
+                        Settings {
+                            language: pref,
+                            ..self.settings.clone()
+                        },
+                    );
                     self.tr = Tr::new(pref.resolve());
                     let title = self.tr.t("app.title").to_string();
                     ui.ctx()

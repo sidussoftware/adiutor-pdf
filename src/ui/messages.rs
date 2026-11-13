@@ -24,7 +24,7 @@ impl AdiutorApp {
         let mut dismiss = None;
         for (i, message) in self.messages.iter().enumerate() {
             ui.horizontal(|ui| {
-                if ui.button(self.tr.t("common.close")).clicked() {
+                if icons::button(ui, true, icons::close, self.tr.t("common.close")).clicked() {
                     dismiss = Some(i);
                 }
                 ui.label(message_text(&self.tr, message));

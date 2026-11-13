@@ -1,6 +1,7 @@
 //! Main window: toolbar, thumbnail grid and bottom bar.
 
 mod grid;
+mod icons;
 mod messages;
 mod modals;
 mod style;
@@ -9,8 +10,9 @@ mod toolbar;
 use crate::batch::Batch;
 use crate::engine::{Command, Engine, Event};
 use crate::i18n::Tr;
+use crate::palette::{self, Palette};
 use crate::ranges::{self, RangeError};
-use crate::settings::{LanguagePref, Settings};
+use crate::settings::{LanguagePref, Settings, ThemePref};
 use crate::thumb_cache::ThumbCache;
 use crate::workspace::{PageRef, SourceDoc, Workspace, free_split_names, split_stem};
 use eframe::egui::{self, TextureHandle, TextureOptions};
@@ -77,6 +79,27 @@ fn range_error_text(tr: &Tr, e: &RangeError) -> String {
     }
 }
 
+fn theme_preference(t: ThemePref) -> egui::ThemePreference {
+    match t {
+        ThemePref::System => egui::ThemePreference::System,
+        ThemePref::Light => egui::ThemePreference::Light,
+        ThemePref::Dark => egui::ThemePreference::Dark,
+    }
+}
+
+/// Installs both themes (so System follows the OS live), the theme preference and the control height.
+fn apply_style(ctx: &egui::Context, pref: ThemePref) {
+    ctx.set_visuals_of(
+        egui::Theme::Light,
+        palette::visuals(&Palette::light(), false),
+    );
+    ctx.set_visuals_of(egui::Theme::Dark, palette::visuals(&Palette::dark(), true));
+    for theme in [egui::Theme::Light, egui::Theme::Dark] {
+        ctx.style_mut_of(theme, |s| s.spacing.interact_size.y = 40.0);
+    }
+    ctx.set_theme(theme_preference(pref));
+}
+
 fn file_name(path: &Path) -> String {
     path.file_name()
         .map_or_else(String::new, |n| n.to_string_lossy().into_owned())
@@ -90,6 +113,7 @@ impl AdiutorApp {
         settings_path: Option<PathBuf>,
         startup_paths: Vec<PathBuf>,
     ) -> Self {
+        apply_style(ctx, loaded.settings.theme);
         let wake_ctx = ctx.clone();
         let engine = Engine::start(move || wake_ctx.request_repaint());
         let mut app = Self {
@@ -142,7 +166,10 @@ impl AdiutorApp {
     }
 
     /// Applies and saves new settings; a failed save is reported but the change stays for this run.
-    fn set_settings(&mut self, s: Settings) {
+    fn set_settings(&mut self, ctx: &egui::Context, s: Settings) {
+        if s.theme != self.settings.theme {
+            ctx.set_theme(theme_preference(s.theme));
+        }
         self.settings = s;
         let Some(path) = &self.settings_path else {
             return;

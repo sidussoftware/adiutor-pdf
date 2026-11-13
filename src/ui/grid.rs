@@ -2,7 +2,7 @@
 
 use super::*;
 use eframe::egui::{Color32, Sense, vec2};
-use style::{on_accent, selection_accent};
+use style::palette;
 
 /// Thumbnail width in points; the engine renders it at `THUMB_WIDTH * pixels_per_point`.
 const THUMB_WIDTH: f32 = 150.0;
@@ -106,12 +106,13 @@ impl AdiutorApp {
                             }
                         };
                         let selected = self.workspace.is_selected(pos);
-                        let accent = selection_accent(ui.visuals());
+                        let pal = palette(ui);
+                        let accent = pal.accent;
                         let number = ui.painter().layout_no_wrap(
                             (pos + 1).to_string(),
                             egui::FontId::proportional(13.0),
                             if selected {
-                                on_accent(accent)
+                                pal.on_accent
                             } else {
                                 ui.visuals().text_color()
                             },
@@ -140,13 +141,10 @@ impl AdiutorApp {
                                 accent,
                                 egui::Stroke::new(2.0, ui.visuals().panel_fill),
                             );
-                            ui.painter().line(
-                                vec![
-                                    c + vec2(-4.5, 0.0),
-                                    c + vec2(-1.0, 3.5),
-                                    c + vec2(5.0, -3.5),
-                                ],
-                                egui::Stroke::new(2.0, on_accent(accent)),
+                            icons::check(
+                                ui.painter(),
+                                egui::Rect::from_center_size(c, vec2(12.0, 12.0)),
+                                pal.on_accent,
                             );
                         }
                         ui.painter()
@@ -182,7 +180,7 @@ impl AdiutorApp {
                             egui::pos2(x, rect.top() + 16.0),
                             egui::pos2(x, rect.bottom()),
                         ],
-                        egui::Stroke::new(3.0, selection_accent(ui.visuals())),
+                        egui::Stroke::new(3.0, palette(ui).accent),
                     );
                     if ui.input(|i| i.pointer.any_released())
                         && egui::DragAndDrop::take_payload::<usize>(ui.ctx()).is_some()
