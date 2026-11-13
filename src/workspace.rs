@@ -25,6 +25,16 @@ pub struct SourceDoc {
     pub page_sizes: Vec<(f32, f32)>,
 }
 
+/// One open document as the sidebar shows it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DocSummary {
+    pub id: DocId,
+    pub letter: String,
+    pub name: String,
+    /// Pages of this document currently in the grid.
+    pub pages_in_grid: usize,
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct Slot {
     pub id: SlotId,
@@ -193,6 +203,23 @@ impl Workspace {
             .collect()
     }
 
+    /// Open documents in opening order with their letter, display name and page count.
+    pub fn doc_summaries(&self) -> Vec<DocSummary> {
+        let paths: Vec<PathBuf> = self.docs.iter().map(|d| d.path.clone()).collect();
+        let names = display_names(&paths);
+        self.docs
+            .iter()
+            .zip(names)
+            .enumerate()
+            .map(|(i, (d, name))| DocSummary {
+                id: d.id,
+                letter: doc_letter(i),
+                name,
+                pages_in_grid: self.slots.iter().filter(|s| s.page.doc == d.id).count(),
+            })
+            .collect()
+    }
+
     pub fn all_pages(&self) -> Vec<PageRef> {
         self.slots.iter().map(|s| s.page).collect()
     }
@@ -296,6 +323,51 @@ pub fn split_stem(ws: &Workspace) -> Option<String> {
     let first = ws.slots().first()?;
     let doc = ws.doc(first.page.doc)?;
     Some(doc.path.file_stem()?.to_string_lossy().into_owned())
+}
+
+/// Spreadsheet-style label: 0 -> "A", 25 -> "Z", 26 -> "AA".
+pub fn doc_letter(index: usize) -> String {
+    let mut n = index + 1;
+    let mut out = Vec::new();
+    while n > 0 {
+        n -= 1;
+        out.push(b'A' + (n % 26) as u8);
+        n /= 26;
+    }
+    out.reverse();
+    String::from_utf8(out).unwrap_or_default()
+}
+
+/// File names; those that collide get " — " and the last two components of their parent folder.
+pub fn display_names(paths: &[PathBuf]) -> Vec<String> {
+    let name = |p: &Path| {
+        p.file_name()
+            .map_or_else(String::new, |n| n.to_string_lossy().into_owned())
+    };
+    paths
+        .iter()
+        .map(|p| {
+            let n = name(p);
+            if paths.iter().filter(|q| name(q) == n).count() < 2 {
+                return n;
+            }
+            let parent: Vec<_> = p
+                .parent()
+                .into_iter()
+                .flat_map(Path::components)
+                .filter_map(|c| match c {
+                    std::path::Component::Normal(s) => Some(s.to_string_lossy().into_owned()),
+                    _ => None,
+                })
+                .collect();
+            let tail = &parent[parent.len().saturating_sub(2)..];
+            if tail.is_empty() {
+                n
+            } else {
+                format!("{n} — {}", tail.join("/"))
+            }
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -480,5 +552,30 @@ mod tests {
         });
         assert!(ws.is_source_path(&dir.path().join(".").join("a.pdf")));
         assert!(!ws.is_source_path(&dir.path().join("b.pdf")));
+    }
+
+    #[test]
+    fn letters_spreadsheet_style() {
+        let l: Vec<_> = [0, 25, 26, 27, 701, 702].map(doc_letter).into();
+        assert_eq!(l, ["A", "Z", "AA", "AB", "ZZ", "AAA"]);
+    }
+
+    #[test]
+    fn display_names_disambiguate_same_file_name() {
+        let p = |s: &str| PathBuf::from(s);
+        let got = display_names(&[p("/a/x/c.pdf"), p("/b/y/c.pdf"), p("/d.pdf")]);
+        assert_eq!(got, ["c.pdf — a/x", "c.pdf — b/y", "d.pdf"]);
+    }
+
+    #[test]
+    fn doc_summaries_count_pages_in_grid() {
+        let mut ws = ws_with(&[2, 1]);
+        ws.select_only(2);
+        ws.delete_selected();
+        ws.select_only(0);
+        ws.delete_selected();
+        let s = ws.doc_summaries();
+        assert_eq!(s[0].pages_in_grid, 1);
+        assert_eq!((s[1].pages_in_grid, s[1].letter.as_str()), (0, "B"));
     }
 }

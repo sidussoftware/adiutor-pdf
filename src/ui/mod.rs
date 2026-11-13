@@ -1,8 +1,9 @@
-//! Main window: toolbar, thumbnail grid and toasts.
+//! Main window: sidebar, top bar, thumbnail grid and toasts.
 
 mod grid;
 mod icons;
 mod modals;
+mod sidebar;
 mod style;
 mod toasts;
 mod toolbar;
@@ -475,8 +476,13 @@ impl eframe::App for AdiutorApp {
             egui::CentralPanel::default().show(ui, |ui| ui.label(text));
             return;
         }
-        egui::Panel::top("toolbar").show(ui, |ui| self.toolbar(ui));
+        self.sidebar(ui);
+        self.toolbar(ui);
         egui::CentralPanel::default().show(ui, |ui| {
+            if let Some(e) = &self.pages_error {
+                let text = range_error_text(&self.tr, e);
+                ui.colored_label(ui.visuals().error_fg_color, text);
+            }
             self.grid(ui);
             self.toasts_ui(ui);
         });

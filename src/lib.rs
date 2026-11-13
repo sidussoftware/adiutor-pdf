@@ -15,7 +15,7 @@ pub mod ui;
 pub mod workspace;
 
 /// Inter first for text, egui's fonts as fallbacks for missing glyphs; `"semibold"` is Inter SemiBold.
-fn install_fonts(ctx: &eframe::egui::Context) {
+pub(crate) fn install_fonts(ctx: &eframe::egui::Context) {
     use eframe::egui::{FontData, FontDefinitions, FontFamily};
     use std::sync::Arc;
     let mut fonts = FontDefinitions::default();
