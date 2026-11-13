@@ -1,6 +1,6 @@
 # Manual test checklist
 
-Tick an item only after doing it on a real build. 
+Tick an item only after doing it on a real build.
 
 ## Open
 - [x] Pass two PDFs as command-line arguments: all pages appear in order, positions numbered from 1 (Xvfb, release build, screenshot)
@@ -31,7 +31,7 @@ Tick an item only after doing it on a real build.
 - [x] Reorder, then "Save PDF": the output has the pages in the grid order (pypdf page widths [300, 700, 400, 500, 600]) (Xvfb + xdg-desktop-portal-gtk, xdotool, screenshots)
 - [x] "Save selection" writes only the selected page; default name is `<first source>_edited.pdf` (Xvfb + xdg-desktop-portal-gtk, xdotool, screenshots)
 - [x] Saving over an open original shows the blocked modal; "Choose another name" reopens the save dialog; the original is unchanged (Xvfb + xdg-desktop-portal-gtk, xdotool, sha256)
-- [x] Messages stack at the bottom and each Close button dismisses its own line
+- [ ] Toasts stack top-right, each on one row with a compact × that dismisses only that toast (also by keyboard)
 - [ ] Progress bar visible while saving a large file; Save/Split disabled meanwhile
 ## Split
 - [x] Empty Pages field splits into one file per page (`A_p1.pdf` ... `A_p5.pdf`) (Xvfb + xdg-desktop-portal-gtk, xdotool, screenshots)
@@ -89,3 +89,9 @@ Generate a 300-page PDF: `python3 -c "from pypdf import PdfWriter as W; w=W(); [
 - [ ] With no documents the drop panel is shown; dropping PDFs on it adds them
 - [ ] The window cannot be resized below 1024x600; the top bar and sidebar stay usable at that size
 - [ ] Top-bar controls are at least 40 px tall and reachable by keyboard (Tab)
+
+## Fonts
+- [ ] Inter renders for text; Italian accents and emoji in file names fall back to egui's fonts without tofu boxes
+
+## Screen reader
+- [ ] Toast × is announced as "Close message"; Language and Theme combos are named; buttons are named without leading spaces (e.g. "Save PDF")
