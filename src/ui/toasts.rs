@@ -69,7 +69,11 @@ fn stack(
             ui.horizontal(|ui| {
                 ui.visuals_mut().override_text_color = Some(fg);
                 let w = ui.available_width() - 40.0 - ui.spacing().item_spacing.x;
-                ui.add_sized([w, 0.0], egui::Label::new(message_text(tr, &t.msg)).wrap());
+                // Not add_sized: its justified layout stretches the letters of wrapped text.
+                let top_down = egui::Layout::top_down(egui::Align::Min);
+                ui.allocate_ui_with_layout(egui::vec2(w, 0.0), top_down, |ui| {
+                    ui.add(egui::Label::new(message_text(tr, &t.msg)).wrap());
+                });
                 if icons::icon_button(ui, icons::close, tr.t("common.close")).clicked() {
                     close = Some(t.id);
                 }
