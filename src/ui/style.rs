@@ -20,7 +20,7 @@ pub(super) fn primary(ui: &mut egui::Ui, pal: &Palette) {
         w.weak_bg_fill = pal.accent;
         w.fg_stroke.color = pal.on_accent;
     }
-    v.widgets.hovered.weak_bg_fill = pal.accent.gamma_multiply(0.9);
+    v.widgets.hovered.weak_bg_fill = pal.accent_hover;
     v.widgets.active.bg_stroke = egui::Stroke::new(2.0, pal.text);
 }
 

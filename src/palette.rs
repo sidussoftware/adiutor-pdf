@@ -13,6 +13,8 @@ pub struct Palette {
     pub text: Color32,
     pub text_secondary: Color32,
     pub accent: Color32,
+    /// Primary buttons under the mouse; `on_accent` stays at least 4.5:1 on it.
+    pub accent_hover: Color32,
     pub on_accent: Color32,
     pub error_bg: Color32,
     pub error_text: Color32,
@@ -38,6 +40,7 @@ impl Palette {
             text: hex(0x1C1917),
             text_secondary: hex(0x57534E),
             accent: hex(0x0F766E),
+            accent_hover: hex(0x115E59),
             on_accent: hex(0xFFFFFF),
             error_bg: hex(0xFEE2E2),
             error_text: hex(0x991B1B),
@@ -61,6 +64,7 @@ impl Palette {
             text: hex(0xF5F5F4),
             text_secondary: hex(0xA8A29E),
             accent: hex(0x2DD4BF),
+            accent_hover: hex(0x14B8A6),
             on_accent: hex(0x042F2E),
             error_bg: hex(0x3F1D1D),
             error_text: hex(0xFECACA),
@@ -115,13 +119,15 @@ pub fn visuals(p: &Palette, dark: bool) -> egui::Visuals {
     w.noninteractive.corner_radius = radius;
     w.inactive.bg_fill = p.card;
     w.inactive.weak_bg_fill = p.card;
-    w.hovered.bg_fill = p.sidebar;
-    w.hovered.weak_bg_fill = p.sidebar;
+    w.hovered.bg_fill = p.border;
+    w.hovered.weak_bg_fill = p.border;
+    w.hovered.bg_stroke = egui::Stroke::new(1.0, p.text_secondary);
     w.active.bg_stroke = egui::Stroke::new(2.0, p.text);
     w.active.bg_fill = p.border;
     w.active.weak_bg_fill = p.border;
-    w.open.bg_fill = p.sidebar;
-    w.open.weak_bg_fill = p.sidebar;
+    w.open.bg_fill = p.border;
+    w.open.weak_bg_fill = p.border;
+    v.interact_cursor = Some(egui::CursorIcon::PointingHand);
     v
 }
 
@@ -163,6 +169,8 @@ mod tests {
                 check(&format!("secondary/{bgn}"), p.text_secondary, bg, 4.5);
             }
             check("on_accent/accent", p.on_accent, p.accent, 4.5);
+            check("on_accent/accent_hover", p.on_accent, p.accent_hover, 4.5);
+            check("text/border (hovered button)", p.text, p.border, 4.5);
             check("accent/bg", p.accent, p.bg, 3.0);
             check("border_strong/card", p.border_strong, p.card, 3.0);
             check("error", p.error_text, p.error_bg, 4.5);
