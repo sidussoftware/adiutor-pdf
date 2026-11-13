@@ -1,10 +1,10 @@
-//! Main window: toolbar, thumbnail grid and bottom bar.
+//! Main window: toolbar, thumbnail grid and toasts.
 
 mod grid;
 mod icons;
-mod messages;
 mod modals;
 mod style;
+mod toasts;
 mod toolbar;
 
 use crate::batch::Batch;
@@ -14,12 +14,14 @@ use crate::palette::{self, Palette};
 use crate::ranges::{self, RangeError};
 use crate::settings::{LanguagePref, Settings, ThemePref};
 use crate::thumb_cache::ThumbCache;
+use crate::toasts::{ToastKind, Toasts};
 use crate::workspace::{PageRef, SourceDoc, Workspace, free_split_names, split_stem};
 use eframe::egui::{self, TextureHandle, TextureOptions};
-use messages::{Message, message_text};
 use std::collections::{HashSet, VecDeque};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
+use std::time::Instant;
+use toasts::message_text;
 
 /// Bytes of thumbnail textures kept (RGBA, 4 bytes per pixel).
 const THUMB_CACHE_BYTES: usize = 48 << 20;
@@ -38,8 +40,8 @@ pub struct AdiutorApp {
     last_visible: Vec<PageRef>,
     /// Scale the cached thumbnails were rendered for.
     pixels_per_point: f32,
-    /// Dismissible messages at the bottom (failures, results).
-    messages: Vec<Message>,
+    /// Failures and results, drawn as toasts.
+    toasts: Toasts,
     /// Contents of the Pages field and the parse error shown under it.
     pages_text: String,
     pages_error: Option<RangeError>,
@@ -126,7 +128,7 @@ impl AdiutorApp {
             cache: ThumbCache::new(THUMB_CACHE_BYTES),
             last_visible: Vec::new(),
             pixels_per_point: ctx.pixels_per_point(),
-            messages: Vec::new(),
+            toasts: Toasts::default(),
             pages_text: String::new(),
             pages_error: None,
             next_job: 0,
@@ -183,7 +185,7 @@ impl AdiutorApp {
     fn error(&mut self, key: &'static str, args: Vec<(&'static str, String)>) {
         let message = (key, args);
         eprintln!("{}", message_text(&self.tr, &message));
-        self.messages.push(message);
+        self.toasts.push(ToastKind::Error, message, Instant::now());
     }
 
     fn lang_label(&self, p: LanguagePref) -> &str {
@@ -253,8 +255,8 @@ impl AdiutorApp {
                 }
                 Event::Saved { job, dest } => {
                     if self.batch.as_ref().is_some_and(|b| !b.is_split()) {
-                        self.messages
-                            .push(("save.done", vec![("file", file_name(&dest))]));
+                        let msg = ("save.done", vec![("file", file_name(&dest))]);
+                        self.toasts.push(ToastKind::Success, msg, Instant::now());
                     }
                     self.finish_job(job, true);
                 }
@@ -286,8 +288,8 @@ impl AdiutorApp {
                 "split.done"
             };
             let folder = folder.to_string_lossy().into_owned();
-            self.messages
-                .push((key, vec![("count", count.to_string()), ("folder", folder)]));
+            let msg = (key, vec![("count", count.to_string()), ("folder", folder)]);
+            self.toasts.push(ToastKind::Success, msg, Instant::now());
         }
         if outcome.mark_saved {
             self.workspace.mark_saved();
@@ -408,6 +410,11 @@ impl eframe::App for AdiutorApp {
     // hidden or covered), so anything that must work then lives here.
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.handle_events(ctx);
+        let now = Instant::now();
+        self.toasts.expire(now);
+        if let Some(d) = self.toasts.next_expiry(now) {
+            ctx.request_repaint_after(d);
+        }
 
         // The default macOS menu is off (see lib.rs), so Cmd+Q arrives here as a key press.
         #[cfg(target_os = "macos")]
@@ -469,8 +476,10 @@ impl eframe::App for AdiutorApp {
             return;
         }
         egui::Panel::top("toolbar").show(ui, |ui| self.toolbar(ui));
-        egui::Panel::bottom("bottom_bar").show(ui, |ui| self.bottom_bar(ui));
-        egui::CentralPanel::default().show(ui, |ui| self.grid(ui));
+        egui::CentralPanel::default().show(ui, |ui| {
+            self.grid(ui);
+            self.toasts_ui(ui);
+        });
         self.password_modal(&ctx);
         self.overwrite_modal(&ctx);
         self.blocked_modal(&ctx);

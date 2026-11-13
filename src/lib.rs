@@ -10,6 +10,7 @@ pub mod pdfium_lib;
 pub mod ranges;
 pub mod settings;
 pub mod thumb_cache;
+pub mod toasts;
 pub mod ui;
 pub mod workspace;
 
