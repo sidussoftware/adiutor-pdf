@@ -279,12 +279,9 @@ impl AdiutorApp {
                 path,
                 doc,
                 page_sizes,
-            } => self.workspace.add_document(SourceDoc {
-                id: doc,
-                path,
-                page_sizes,
-                removed: false,
-            }),
+            } => self
+                .workspace
+                .add_document(SourceDoc::new(doc, path, page_sizes)),
             Event::Thumbnail {
                 page,
                 width,
@@ -355,13 +352,12 @@ impl AdiutorApp {
 
     /// Sends one `Save` per (pages, dest) and starts tracking them as a batch.
     fn start_batch(&mut self, jobs: Vec<(Vec<PageRef>, PathBuf)>, split_folder: Option<PathBuf>) {
-        if jobs.iter().any(|(_, d)| self.workspace.is_source_path(d)) {
-            let file = jobs
-                .iter()
-                .map(|(_, d)| d)
-                .find(|d| self.workspace.is_source_path(d))
-                .map(|d| file_name(d))
-                .unwrap_or_default();
+        let blocked = jobs
+            .iter()
+            .map(|(_, d)| d)
+            .find(|d| self.workspace.is_source_path(d));
+        if let Some(dest) = blocked {
+            let file = file_name(dest);
             self.error("save.blocked_body", vec![("file", file)]);
             return;
         }
@@ -535,18 +531,16 @@ impl eframe::App for AdiutorApp {
             || !self.passwords.is_empty()
             || self.pending_overwrite.is_some()
             || self.blocked_save.is_some();
-        let delete = !modal_open
-            && !ctx.egui_wants_keyboard_input()
-            && ctx
-                .input(|i| i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace));
-        if delete {
-            self.workspace.delete_selected();
-        }
-        if !modal_open
-            && !ctx.egui_wants_keyboard_input()
-            && ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::A))
-        {
-            self.workspace.select_all();
+        // Grid shortcuts only when no dialog is open and no text field has focus.
+        if !modal_open && !ctx.egui_wants_keyboard_input() {
+            if ctx
+                .input(|i| i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace))
+            {
+                self.workspace.delete_selected();
+            }
+            if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::A)) {
+                self.workspace.select_all();
+            }
         }
 
         // A page drag drops the selection; undo or redo mid-drag would change what it moves.

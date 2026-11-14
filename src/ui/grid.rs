@@ -98,6 +98,15 @@ impl AdiutorApp {
         let mut cells: Vec<egui::Rect> = Vec::new();
         let dragging = egui::DragAndDrop::has_payload_of_type::<usize>(ui.ctx());
         let mods = ui.input(|i| i.modifiers);
+        let pal = palette(ui);
+        // Summaries by DocId, so each thumbnail finds its document directly.
+        let mut by_id: Vec<Option<&DocSummary>> = Vec::new();
+        for d in docs {
+            if by_id.len() <= d.id {
+                by_id.resize(d.id + 1, None);
+            }
+            by_id[d.id] = Some(d);
+        }
         egui::ScrollArea::vertical()
             .auto_shrink(false)
             // Room for the selection frame and badge at the edges; inside the clip rect.
@@ -171,8 +180,7 @@ impl AdiutorApp {
                             }
                         };
                         let selected = self.workspace.is_selected(pos);
-                        let pal = palette(ui);
-                        let doc = docs.iter().find(|d| d.id == slot.page.doc);
+                        let doc = by_id.get(slot.page.doc).copied().flatten();
                         // Thin border so white pages stand out; the selection frame is drawn outside it.
                         ui.painter().rect_stroke(
                             page_rect,
@@ -287,7 +295,7 @@ impl AdiutorApp {
                             egui::pos2(x, rect.top() + 16.0),
                             egui::pos2(x, rect.bottom()),
                         ],
-                        egui::Stroke::new(3.0, palette(ui).accent),
+                        egui::Stroke::new(3.0, pal.accent),
                     );
                     if ui.input(|i| i.pointer.any_released())
                         && egui::DragAndDrop::take_payload::<usize>(ui.ctx()).is_some()

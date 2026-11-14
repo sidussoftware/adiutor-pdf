@@ -28,6 +28,18 @@ pub struct SourceDoc {
     pub removed: bool,
 }
 
+impl SourceDoc {
+    /// A document as the engine opened it.
+    pub fn new(id: DocId, path: PathBuf, page_sizes: Vec<(f32, f32)>) -> Self {
+        Self {
+            id,
+            path,
+            page_sizes,
+            removed: false,
+        }
+    }
+}
+
 /// One open document as the sidebar shows it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DocSummary {
@@ -200,7 +212,8 @@ impl Workspace {
     }
 
     pub fn doc(&self, id: DocId) -> Option<&SourceDoc> {
-        self.docs.iter().find(|d| d.id == id)
+        // DocId is the position in `docs` (both come from the engine's open order).
+        self.docs.get(id).filter(|d| d.id == id)
     }
 
     pub fn slots(&self) -> &[Slot] {
@@ -344,6 +357,12 @@ impl Workspace {
             .collect();
         let paths: Vec<PathBuf> = shown.iter().map(|(_, d)| d.path.clone()).collect();
         let names = display_names(&paths);
+        let mut counts = vec![0; self.docs.len()];
+        for s in &self.slots {
+            if let Some(c) = counts.get_mut(s.page.doc) {
+                *c += 1;
+            }
+        }
         shown
             .into_iter()
             .zip(names)
@@ -351,7 +370,7 @@ impl Workspace {
                 id: d.id,
                 letter: doc_letter(i),
                 name,
-                pages_in_grid: self.slots.iter().filter(|s| s.page.doc == d.id).count(),
+                pages_in_grid: counts.get(d.id).copied().unwrap_or(0),
             })
             .collect()
     }
