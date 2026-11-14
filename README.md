@@ -51,7 +51,11 @@ The archive bundles PDFium only. The system must provide:
    Ctrl+A (Cmd+A on macOS) selects all pages.
 4. Drag selected pages to reorder them; press Delete or Backspace to remove them. **Clear all** in the sidebar
    removes every document and returns to the empty window (it asks first if there are unsaved changes).
-5. **Save PDF** writes the grid in its current order. **Save selection** writes only the selected pages.
+5. The **×** on a document in the sidebar removes it and all its pages (a notice says how to undo). **↶ Undo** and
+   **↷ Redo** in the top bar, or Ctrl+Z and Ctrl+Y / Ctrl+Shift+Z (Cmd+Z and Cmd+Shift+Z on macOS), step back and
+   forward through adding a document, removing a document, deleting pages and moving pages, for up to 50 steps.
+   **Clear all** empties the history.
+6. **Save PDF** writes the grid in its current order. **Save selection** writes only the selected pages.
    **Split** writes one file per page-number group (see below) into a folder you choose. Closing the window with
    **Close anyway** during a split keeps the files already written (each one complete) and stops the rest.
    A progress card shows while saving; results appear as notices at the top right (success notices close after

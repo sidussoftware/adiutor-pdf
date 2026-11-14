@@ -34,6 +34,8 @@ pub struct Batch {
 pub struct Outcome {
     /// Every page was written, in order, and the grid did not change meanwhile.
     pub mark_saved: bool,
+    /// Every page of the grid as it was when the batch started was written, in order.
+    pub wrote_all: bool,
     /// A split that created at least one file: (files created, folder).
     pub split_done: Option<(usize, PathBuf)>,
 }
@@ -107,8 +109,10 @@ impl Batch {
         if self.jobs.values().any(|j| !j.finished) {
             return None;
         }
+        let wrote_all = !self.failed && self.covers_all;
         Some(Outcome {
-            mark_saved: !self.failed && self.covers_all && current == self.pages,
+            mark_saved: wrote_all && current == self.pages,
+            wrote_all,
             split_done: self
                 .split_folder
                 .clone()
@@ -169,6 +173,7 @@ mod tests {
             outcome,
             Outcome {
                 mark_saved: true,
+                wrote_all: true,
                 split_done: Some((2, "dir".into())),
             }
         );
@@ -203,9 +208,30 @@ mod tests {
             outcome,
             Outcome {
                 mark_saved: false,
+                wrote_all: true,
                 split_done: None,
             }
         );
+    }
+
+    #[test]
+    fn full_save_wrote_all_even_if_grid_changed() {
+        let all = [p(0), p(1)];
+        let mut next = 0;
+        let (mut b, send) = Batch::new(vec![job(&all)], all.to_vec(), None, &mut next);
+        let outcome = b.finish(send[0].0, true, &[p(0)]).unwrap();
+        assert!(outcome.wrote_all);
+        assert!(!outcome.mark_saved);
+    }
+
+    #[test]
+    fn failed_or_partial_save_did_not_write_all() {
+        let all = [p(0), p(1)];
+        let mut next = 0;
+        let (mut b, send) = Batch::new(vec![job(&all)], all.to_vec(), None, &mut next);
+        assert!(!b.finish(send[0].0, false, &all).unwrap().wrote_all);
+        let (mut b, send) = Batch::new(vec![job(&[p(0)])], all.to_vec(), None, &mut next);
+        assert!(!b.finish(send[0].0, true, &all).unwrap().wrote_all);
     }
 
     #[test]

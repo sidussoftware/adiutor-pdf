@@ -32,6 +32,42 @@ pub fn close(p: &Painter, rect: Rect, color: Color32) {
     path(p, rect, color, &[(18.0, 6.0), (6.0, 18.0)]);
 }
 
+/// Curved arrow pointing back (left).
+pub fn undo(p: &Painter, rect: Rect, color: Color32) {
+    path(p, rect, color, &[(8.0, 5.0), (4.0, 9.0), (8.0, 13.0)]);
+    path(
+        p,
+        rect,
+        color,
+        &[
+            (4.0, 9.0),
+            (14.0, 9.0),
+            (19.0, 11.5),
+            (19.0, 16.0),
+            (15.0, 19.0),
+            (9.0, 19.0),
+        ],
+    );
+}
+
+/// Curved arrow pointing forward (right).
+pub fn redo(p: &Painter, rect: Rect, color: Color32) {
+    path(p, rect, color, &[(16.0, 5.0), (20.0, 9.0), (16.0, 13.0)]);
+    path(
+        p,
+        rect,
+        color,
+        &[
+            (20.0, 9.0),
+            (10.0, 9.0),
+            (5.0, 11.5),
+            (5.0, 16.0),
+            (9.0, 19.0),
+            (15.0, 19.0),
+        ],
+    );
+}
+
 pub fn check(p: &Painter, rect: Rect, color: Color32) {
     path(p, rect, color, &[(5.0, 12.5), (10.0, 17.5), (19.0, 7.0)]);
 }
@@ -109,4 +145,5 @@ pub fn icon_button(ui: &mut eframe::egui::Ui, icon: IconFn, name: &str) -> efram
     )
     .accessible_name(name)
     .on_hover_text(name)
+    .on_disabled_hover_text(name)
 }

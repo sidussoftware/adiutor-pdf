@@ -1,7 +1,7 @@
 //! Left sidebar: app name, add button, document list, language and theme.
 
 use super::*;
-use crate::workspace::DocSummary;
+use crate::workspace::{DocId, DocSummary};
 use egui::{Align, Layout, RichText, Sense, Stroke, vec2};
 use style::palette;
 
@@ -28,12 +28,14 @@ fn dashed_border(ui: &egui::Ui, rect: egui::Rect, color: egui::Color32) {
     ));
 }
 
-/// The document rows (view only); `empty` is shown when there are none.
-pub(super) fn doc_list(ui: &mut egui::Ui, tr: &Tr, docs: &[DocSummary]) {
+/// The document rows; the empty hint is shown when there are none.
+/// Returns the id of the document whose × was clicked.
+pub(super) fn doc_list(ui: &mut egui::Ui, tr: &Tr, docs: &[DocSummary]) -> Option<DocId> {
     let pal = palette(ui);
+    let mut removed = None;
     if docs.is_empty() {
         ui.label(RichText::new(tr.t("sidebar.empty")).color(pal.text_secondary));
-        return;
+        return None;
     }
     for d in docs {
         let count = d.pages_in_grid.to_string();
@@ -55,7 +57,11 @@ pub(super) fn doc_list(ui: &mut egui::Ui, tr: &Tr, docs: &[DocSummary]) {
                     let (sw, _) = ui.allocate_exact_size(vec2(12.0, 12.0), Sense::hover());
                     ui.painter()
                         .rect_filled(sw, 3.0, pal.doc_colors[d.id % pal.doc_colors.len()]);
+                    // Leave room for the 40 px x button at the right end.
+                    let text_w =
+                        (ui.available_width() - 40.0 - ui.spacing().item_spacing.x).max(0.0);
                     ui.vertical(|ui| {
+                        ui.set_width(text_w);
                         ui.spacing_mut().item_spacing.y = 2.0;
                         ui.add(egui::Label::new(RichText::new(&d.name).color(pal.text)).truncate())
                             .on_hover_text(&d.name);
@@ -65,10 +71,17 @@ pub(super) fn doc_list(ui: &mut egui::Ui, tr: &Tr, docs: &[DocSummary]) {
                                 .color(pal.text_secondary),
                         );
                     });
+                    let name = tr.tf("sidebar.remove", &[("file", &d.name)]);
+                    let x = icons::icon_button(ui, icons::close, &name);
+                    // Later clicks of a double or triple click would hit the next row's x.
+                    if x.clicked() && !x.double_clicked() && !x.triple_clicked() {
+                        removed = Some(d.id);
+                    }
                 });
             });
         ui.add_space(4.0);
     }
+    removed
 }
 
 impl AdiutorApp {
@@ -118,12 +131,16 @@ impl AdiutorApp {
                 }
             });
         });
+        let mut removed = None;
         egui::ScrollArea::vertical()
             .auto_shrink(false)
             .show(ui, |ui| {
                 ui.spacing_mut().item_spacing.y = 0.0;
-                doc_list(ui, &self.tr, docs);
+                removed = doc_list(ui, &self.tr, docs);
             });
+        if let Some(id) = removed {
+            self.remove_doc(id, docs);
+        }
     }
 
     fn add_button(&mut self, ui: &mut egui::Ui) {
@@ -258,12 +275,64 @@ mod tests {
         ];
         let mut h = Harness::builder()
             .with_context_setup(crate::install_fonts)
-            .build_ui(move |ui| doc_list(ui, &tr, &docs));
+            .build_ui(move |ui| {
+                doc_list(ui, &tr, &docs);
+            });
         h.run();
         h.get_by_label("A");
         h.get_by_label("contratto.pdf");
         h.get_by_label("8 pages");
         h.get_by_label("B");
         h.get_by_label("1 page");
+    }
+
+    #[test]
+    fn remove_button_has_accessible_name() {
+        let tr = Tr::new(Lang::It);
+        let docs = vec![DocSummary {
+            id: 7,
+            letter: "A".into(),
+            name: "contratto.pdf".into(),
+            pages_in_grid: 2,
+        }];
+        let mut removed = None;
+        let mut h = Harness::builder()
+            .with_context_setup(crate::install_fonts)
+            .build_ui(|ui| {
+                if let Some(id) = doc_list(ui, &tr, &docs) {
+                    removed = Some(id);
+                }
+            });
+        h.run();
+        h.get_by_label("Togli contratto.pdf").click();
+        h.run();
+        drop(h);
+        assert_eq!(removed, Some(7));
+    }
+
+    #[test]
+    fn double_or_triple_click_on_remove_removes_one_document() {
+        let tr = Tr::new(Lang::En);
+        let docs = vec![DocSummary {
+            id: 0,
+            letter: "A".into(),
+            name: "a.pdf".into(),
+            pages_in_grid: 1,
+        }];
+        let mut removals = 0;
+        let mut h = Harness::builder()
+            .with_context_setup(crate::install_fonts)
+            .with_step_dt(0.05)
+            .build_ui(|ui| {
+                removals += usize::from(doc_list(ui, &tr, &docs).is_some());
+            });
+        h.run();
+        // Three clicks well inside the double-click delay (0.3 s).
+        for _ in 0..3 {
+            h.get_by_label("Remove a.pdf").click();
+            h.step();
+        }
+        drop(h);
+        assert_eq!(removals, 1);
     }
 }

@@ -49,6 +49,8 @@ pub struct AdiutorApp {
     next_job: u64,
     /// The running save or split, if any.
     batch: Option<Batch>,
+    /// `workspace.rev()` when the batch started: the state its files hold.
+    batch_rev: u64,
     /// Encrypted files waiting for a password (path, previous attempt was wrong).
     passwords: VecDeque<(PathBuf, bool)>,
     password_text: String,
@@ -112,6 +114,16 @@ fn file_name(path: &Path) -> String {
         .map_or_else(String::new, |n| n.to_string_lossy().into_owned())
 }
 
+/// Keyboard shortcut text for "undo" or "redo" on this platform.
+fn shortcut(action: &str) -> &'static str {
+    match (action, cfg!(target_os = "macos")) {
+        ("undo", true) => "Cmd+Z",
+        ("undo", false) => "Ctrl+Z",
+        (_, true) => "Cmd+Shift+Z",
+        (_, false) => "Ctrl+Y",
+    }
+}
+
 impl AdiutorApp {
     pub fn new(
         ctx: &egui::Context,
@@ -138,6 +150,7 @@ impl AdiutorApp {
             pages_error: None,
             next_job: 0,
             batch: None,
+            batch_rev: 0,
             passwords: VecDeque::new(),
             password_text: String::new(),
             close_prompt: false,
@@ -163,6 +176,26 @@ impl AdiutorApp {
         {
             self.engine_died();
         }
+    }
+
+    /// Removes a document from the grid and says how to get it back.
+    fn remove_doc(&mut self, id: crate::workspace::DocId, docs: &[crate::workspace::DocSummary]) {
+        let Some(d) = docs.iter().find(|d| d.id == id) else {
+            return;
+        };
+        let n = self.workspace.remove_document(id);
+        let key = if n == 1 {
+            "toast.removed_one"
+        } else {
+            "toast.removed_many"
+        };
+        let args = vec![
+            ("file", d.name.clone()),
+            ("count", n.to_string()),
+            ("shortcut", shortcut("undo").to_string()),
+        ];
+        self.toasts
+            .push(ToastKind::Success, (key, args), Instant::now());
     }
 
     /// Removes every document and returns to the empty state; the app stays open.
@@ -263,6 +296,7 @@ impl AdiutorApp {
                     id: doc,
                     path,
                     page_sizes,
+                    removed: false,
                 }),
                 Event::Thumbnail {
                     page,
@@ -331,6 +365,9 @@ impl AdiutorApp {
         }
         if outcome.mark_saved {
             self.workspace.mark_saved();
+        } else if outcome.wrote_all {
+            // The grid changed (e.g. undo) during the save: only the state it started from is on disk.
+            self.workspace.mark_saved_at(self.batch_rev);
         }
     }
 
@@ -349,6 +386,7 @@ impl AdiutorApp {
         let all = self.workspace.all_pages();
         let (batch, send) = Batch::new(jobs, all, split_folder, &mut self.next_job);
         self.batch = Some(batch);
+        self.batch_rev = self.workspace.rev();
         for (job, pages, dest) in send {
             self.send(Command::Save { job, pages, dest });
         }
@@ -436,6 +474,26 @@ impl AdiutorApp {
     }
 }
 
+/// Consumes an undo or redo shortcut: Some(true) = redo, Some(false) = undo. Does nothing when
+/// `blocked` or while a widget (e.g. the Pages field) has keyboard focus, so text keeps its own undo.
+fn history_shortcut(ctx: &egui::Context, blocked: bool) -> Option<bool> {
+    use egui::{Key, Modifiers};
+    if blocked || ctx.egui_wants_keyboard_input() {
+        return None;
+    }
+    let (cmd, shift) = (Modifiers::COMMAND, Modifiers::SHIFT);
+    ctx.input_mut(|i| {
+        // Redo first: Cmd+Z also matches Cmd+Shift+Z.
+        if i.consume_key(cmd | shift, Key::Z)
+            || (!cfg!(target_os = "macos") && i.consume_key(cmd, Key::Y))
+        {
+            Some(true)
+        } else {
+            i.consume_key(cmd, Key::Z).then_some(false)
+        }
+    })
+}
+
 impl AdiutorApp {
     /// True if closing now would lose something, so the close must be confirmed first.
     fn needs_close_confirm(&self) -> bool {
@@ -491,6 +549,7 @@ impl eframe::App for AdiutorApp {
         }
 
         let modal_open = self.close_prompt
+            || self.clear_prompt
             || !self.passwords.is_empty()
             || self.pending_overwrite.is_some()
             || self.blocked_save.is_some();
@@ -506,6 +565,14 @@ impl eframe::App for AdiutorApp {
             && ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::A))
         {
             self.workspace.select_all();
+        }
+
+        // A page drag drops the selection; undo or redo mid-drag would change what it moves.
+        let blocked = modal_open || egui::DragAndDrop::has_any_payload(&ctx);
+        match history_shortcut(&ctx, blocked) {
+            Some(true) => _ = self.workspace.redo(),
+            Some(false) => _ = self.workspace.undo(),
+            None => {}
         }
 
         if let Err(reason) = &self.engine {
@@ -529,5 +596,67 @@ impl eframe::App for AdiutorApp {
         self.blocked_modal(&ctx);
         self.clear_modal(&ctx);
         self.close_modal(&ctx);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use egui::{Key, Modifiers};
+    use egui_kittest::Harness;
+    use egui_kittest::kittest::Queryable;
+
+    /// Everything `history_shortcut` reports for one key press (true = redo, false = undo).
+    fn press(modifiers: Modifiers, key: Key, blocked: bool) -> Vec<bool> {
+        let mut got = Vec::new();
+        let mut h = Harness::new_ui(|ui| {
+            got.extend(history_shortcut(ui.ctx(), blocked));
+        });
+        h.key_press_modifiers(modifiers, key);
+        h.run();
+        drop(h);
+        got
+    }
+
+    #[test]
+    fn command_z_undoes() {
+        assert_eq!(press(Modifiers::COMMAND, Key::Z, false), [false]);
+    }
+
+    #[test]
+    fn command_shift_z_redoes_and_does_not_undo() {
+        let cmd_shift = Modifiers::COMMAND | Modifiers::SHIFT;
+        assert_eq!(press(cmd_shift, Key::Z, false), [true]);
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn ctrl_y_redoes() {
+        assert_eq!(press(Modifiers::COMMAND, Key::Y, false), [true]);
+    }
+
+    #[test]
+    fn blocked_shortcuts_do_nothing() {
+        assert!(press(Modifiers::COMMAND, Key::Z, true).is_empty());
+    }
+
+    #[test]
+    fn focused_text_field_keeps_its_own_undo() {
+        let mut text = String::new();
+        let mut got = None;
+        let mut h = Harness::new_ui(|ui| {
+            got = got.or(history_shortcut(ui.ctx(), false));
+            ui.text_edit_singleline(&mut text).accessible_name("Pages");
+        });
+        h.get_by_label("Pages").focus();
+        h.run();
+        h.get_by_label("Pages").type_text("1-3");
+        h.run();
+        assert_eq!(h.get_by_label("Pages").value().as_deref(), Some("1-3"));
+        h.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+        h.run();
+        drop(h);
+        assert_eq!(got, None);
+        assert_eq!(text, "");
     }
 }
