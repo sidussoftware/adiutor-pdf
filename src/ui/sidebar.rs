@@ -3,30 +3,7 @@
 use super::*;
 use crate::workspace::{DocId, DocSummary};
 use egui::{Align, Layout, RichText, Sense, Stroke, vec2};
-use style::palette;
-
-pub(super) fn semibold(text: impl Into<String>, size: f32) -> RichText {
-    RichText::new(text)
-        .family(egui::FontFamily::Name("semibold".into()))
-        .size(size)
-}
-
-/// Dashed rectangle outline over a button.
-fn dashed_border(ui: &egui::Ui, rect: egui::Rect, color: egui::Color32) {
-    let pts = [
-        rect.left_top(),
-        rect.right_top(),
-        rect.right_bottom(),
-        rect.left_bottom(),
-        rect.left_top(),
-    ];
-    ui.painter().extend(egui::Shape::dashed_line(
-        &pts,
-        Stroke::new(1.0, color),
-        5.0,
-        4.0,
-    ));
-}
+use style::{palette, semibold};
 
 /// The document rows; the empty hint is shown when there are none.
 /// Returns the id of the document whose × was clicked.
@@ -39,11 +16,7 @@ pub(super) fn doc_list(ui: &mut egui::Ui, tr: &Tr, docs: &[DocSummary]) -> Optio
     }
     for d in docs {
         let count = d.pages_in_grid.to_string();
-        let key = if d.pages_in_grid == 1 {
-            "sidebar.pages_one"
-        } else {
-            "sidebar.pages_many"
-        };
+        let key = plural(d.pages_in_grid, "sidebar.pages_one", "sidebar.pages_many");
         egui::Frame::new()
             .fill(pal.card)
             .stroke(Stroke::new(1.0, pal.border))
@@ -174,7 +147,7 @@ impl AdiutorApp {
             } else {
                 pal.border_strong
             };
-            dashed_border(ui, r.rect, c);
+            style::dashed_rect(ui, r.rect, 8.0, Stroke::new(1.0, c), 5.0, 4.0);
         }
         if r.clicked() {
             self.pick_pdfs();
@@ -237,6 +210,14 @@ impl AdiutorApp {
         if next != self.settings {
             let ctx = ui.ctx().clone();
             self.set_settings(&ctx, next);
+        }
+    }
+
+    fn lang_label(&self, p: LanguagePref) -> &str {
+        match p {
+            LanguagePref::System => self.tr.t("lang.system"),
+            LanguagePref::English => self.tr.t("lang.en"),
+            LanguagePref::Italian => self.tr.t("lang.it"),
         }
     }
 

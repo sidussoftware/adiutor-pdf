@@ -484,17 +484,19 @@ pub fn doc_letter(index: usize) -> String {
     String::from_utf8(out).unwrap_or_default()
 }
 
+/// The path's file name, or "" if it has none.
+pub fn file_name(path: &Path) -> String {
+    path.file_name()
+        .map_or_else(String::new, |n| n.to_string_lossy().into_owned())
+}
+
 /// File names; those that collide get " — " and the last two components of their parent folder.
 pub fn display_names(paths: &[PathBuf]) -> Vec<String> {
-    let name = |p: &Path| {
-        p.file_name()
-            .map_or_else(String::new, |n| n.to_string_lossy().into_owned())
-    };
     paths
         .iter()
         .map(|p| {
-            let n = name(p);
-            if paths.iter().filter(|q| name(q) == n).count() < 2 {
+            let n = file_name(p);
+            if paths.iter().filter(|q| file_name(q) == n).count() < 2 {
                 return n;
             }
             let parent: Vec<_> = p

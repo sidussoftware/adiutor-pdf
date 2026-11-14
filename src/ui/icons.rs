@@ -1,4 +1,5 @@
-//! Small stroke icons drawn with the painter. They are decorative: every button also has a text label.
+//! Small stroke icons drawn with the painter. Next to a text label they are decorative; icon-only
+//! buttons (`icon_button`) carry an accessible name and a tooltip instead.
 
 use eframe::egui::{Color32, Painter, Pos2, Rect, Stroke, pos2};
 
@@ -112,7 +113,7 @@ pub fn file_add(p: &Painter, rect: Rect, color: Color32) {
     path(p, rect, color, &[(10.0, 14.0), (12.5, 11.5), (15.0, 14.0)]);
 }
 
-type IconFn = fn(&Painter, Rect, Color32);
+pub type IconFn = fn(&Painter, Rect, Color32);
 
 pub fn glyph<'a>(icon: IconFn) -> eframe::egui::Atom<'a> {
     // Painted in the button's text colour, so disabled buttons fade it too.

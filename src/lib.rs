@@ -14,6 +14,9 @@ pub mod toasts;
 pub mod ui;
 pub mod workspace;
 
+/// Font family name of Inter SemiBold, registered by `install_fonts`.
+pub(crate) const SEMIBOLD: &str = "semibold";
+
 /// Inter first for text, egui's fonts as fallbacks for missing glyphs; `"semibold"` is Inter SemiBold.
 pub(crate) fn install_fonts(ctx: &eframe::egui::Context) {
     use eframe::egui::{FontData, FontDefinitions, FontFamily};
@@ -38,7 +41,7 @@ pub(crate) fn install_fonts(ctx: &eframe::egui::Context) {
     bold.extend(fonts.families[&FontFamily::Proportional].clone());
     fonts
         .families
-        .insert(FontFamily::Name("semibold".into()), bold);
+        .insert(FontFamily::Name(SEMIBOLD.into()), bold);
     ctx.set_fonts(fonts);
 }
 

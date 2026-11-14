@@ -4,8 +4,7 @@ use super::*;
 use crate::palette::contrast;
 use crate::workspace::DocSummary;
 use eframe::egui::{Color32, Sense, vec2};
-use sidebar::semibold;
-use style::palette;
+use style::{palette, semibold, semibold_family};
 
 /// Thumbnail width in points; the engine renders it at `THUMB_WIDTH * pixels_per_point`.
 const THUMB_WIDTH: f32 = 150.0;
@@ -25,35 +24,19 @@ fn tag_text_color(bg: Color32) -> Color32 {
     }
 }
 
-/// Outline of a rounded rectangle as a closed polyline (for dashing).
-fn rounded_outline(r: egui::Rect, rad: f32) -> Vec<egui::Pos2> {
-    let mut pts = Vec::new();
-    for (corner, start) in [
-        (egui::pos2(r.max.x - rad, r.min.y + rad), 270.0_f32),
-        (egui::pos2(r.max.x - rad, r.max.y - rad), 0.0),
-        (egui::pos2(r.min.x + rad, r.max.y - rad), 90.0),
-        (egui::pos2(r.min.x + rad, r.min.y + rad), 180.0),
-    ] {
-        for i in 0..=8 {
-            let a = (start + i as f32 * 90.0 / 8.0).to_radians();
-            pts.push(corner + vec2(a.cos(), a.sin()) * rad);
-        }
-    }
-    pts.push(pts[0]);
-    pts
-}
-
 /// The dashed drop panel shown with no documents; true when its Add PDF button was clicked.
 fn empty_state(ui: &mut egui::Ui, tr: &Tr) -> bool {
     let pal = palette(ui);
     let rect = ui.available_rect_before_wrap().shrink(40.0);
     ui.painter().rect_filled(rect, 16.0, pal.card);
-    ui.painter().extend(egui::Shape::dashed_line(
-        &rounded_outline(rect, 16.0),
+    style::dashed_rect(
+        ui,
+        rect,
+        16.0,
         egui::Stroke::new(2.0, pal.border_strong),
         8.0,
         6.0,
-    ));
+    );
     let mut clicked = false;
     // Content is about 250 pt tall; centre it vertically.
     let top = ((rect.height() - 250.0) / 2.0).max(0.0);
@@ -207,7 +190,7 @@ impl AdiutorApp {
                             // The letter keeps the document identifiable without colour.
                             let letter = ui.painter().layout_no_wrap(
                                 d.letter.clone(),
-                                egui::FontId::new(12.0, egui::FontFamily::Name("semibold".into())),
+                                egui::FontId::new(12.0, semibold_family()),
                                 tag_text_color(color),
                             );
                             let tag = egui::Rect::from_min_size(

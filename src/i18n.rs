@@ -12,15 +12,6 @@ pub enum Lang {
 }
 
 impl Lang {
-    pub const ALL: [Lang; 2] = [Lang::En, Lang::It];
-
-    pub fn native_name(self) -> &'static str {
-        match self {
-            Lang::En => "English",
-            Lang::It => "Italiano",
-        }
-    }
-
     /// Maps a locale such as "it", "it-IT" or "it_IT.UTF-8" to a language; anything else is English.
     pub fn from_locale(locale: Option<&str>) -> Lang {
         let primary = locale.and_then(|l| l.split(['-', '_', '.']).next());
@@ -47,7 +38,6 @@ fn parse(src: &'static str) -> Table {
 }
 
 pub struct Tr {
-    lang: Lang,
     current: Table,
     english: Table,
 }
@@ -59,15 +49,7 @@ impl Tr {
             Lang::En => english.clone(),
             Lang::It => parse(IT),
         };
-        Tr {
-            lang,
-            current,
-            english,
-        }
-    }
-
-    pub fn lang(&self) -> Lang {
-        self.lang
+        Tr { current, english }
     }
 
     /// Looks up `key`; falls back to English, then to the key itself.

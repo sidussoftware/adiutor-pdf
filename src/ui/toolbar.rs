@@ -1,9 +1,8 @@
 //! Top bar: page selection on the left, save and split on the right.
 
 use super::*;
+use icons::IconFn;
 use style::palette;
-
-type IconFn = fn(&egui::Painter, egui::Rect, egui::Color32);
 
 /// The icon-only Undo and Redo buttons, in right-to-left order; returns (undo, redo) clicked.
 fn undo_redo_buttons(ui: &mut egui::Ui, tr: &Tr, can_undo: bool, can_redo: bool) -> (bool, bool) {
