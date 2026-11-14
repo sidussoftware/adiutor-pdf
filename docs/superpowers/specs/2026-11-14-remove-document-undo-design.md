@@ -13,13 +13,13 @@ back, every page edit should also be undoable.
 ## Goals
 
 - Remove one document, with all its pages, from the sidebar in one click.
-- Undo and redo the three page edits: removing a document, deleting pages (Delete/Backspace), and moving pages by
-  drag.
+- Undo and redo four edits: adding a document (Add PDF, drop, command line), removing a document, deleting pages
+  (Delete/Backspace), and moving pages by drag.
 - Keep the app light on 2015 hardware: no noticeable memory or CPU cost, and idle CPU stays at about 0%.
 
 ## Non-goals
 
-- Undo for Add PDF, for Clear all, or for selection changes (click, Ctrl/Shift+click, Ctrl+A, Pages + Select).
+- Undo for Clear all, or for selection changes (click, Ctrl/Shift+click, Ctrl+A, Pages + Select).
 - The other #6 actions: click a document to select its pages, and drag to reorder documents.
 - Undo that survives a restart.
 
@@ -42,8 +42,12 @@ back, every page edit should also be undoable.
    - A file added afterwards gets the next letter in opening order.
    - After Clear all, letters restart at A, as they do today.
 4. **What undo covers.**
-   - Undoable: remove document, delete pages, move pages by drag.
-   - Not undoable: selection changes, Add PDF, Clear all.
+   - Undoable: add document, remove document, delete pages, move pages by drag.
+   - Not undoable: selection changes, Clear all.
+   - Undo goes back strictly one step at a time, in order. Example: remove A, add C, then Ctrl+Z takes C away, and a
+     second Ctrl+Z brings A back.
+   - The owner first chose to leave Add PDF out, then included it: otherwise undoing an older step would silently
+     drop the pages of files added afterwards.
 5. **Redo.**
    - Windows and Linux: Ctrl+Y or Ctrl+Shift+Z. macOS: Cmd+Shift+Z.
    - Any new undoable edit discards the redo history, as in every editor.
@@ -66,7 +70,7 @@ back, every page edit should also be undoable.
 12. **Selection after undo or redo.** The slots that the step brought back are selected, so the user sees what
     changed. For an undone delete or remove, those are the pages that came back. For an undone or redone move, they
     are the moved pages.
-13. **A removed document stays open in the PDF engine** until Clear all or app exit. Undoing a removal therefore
+13. **A removed or un-added document stays open in the PDF engine** until Clear all or app exit. Undoing a removal therefore
     brings back its pages with their thumbnails, without reading the file again.
 
 ## Approaches considered
@@ -91,12 +95,14 @@ back, every page edit should also be undoable.
 - `doc_summaries()` returns only documents that are not removed.
   - Display-name disambiguation considers only those documents too, so removing one of two `c.pdf` files makes the
     other plain `c.pdf` again.
+- `add_document` becomes undoable: it pushes a snapshot like the other edits. Undoing it marks the document removed,
+  and redo brings it back. Its letter stays reserved, so a file added after the undo gets the next letter.
 - New `remove_document(id: DocId) -> usize`: drops every slot of that document, marks it removed, clears selection
   and anchor for those slots, and returns the number of pages removed. It is undoable.
 - `is_source_path` keeps checking removed documents. Their files are still open in the engine, so saving over them
   must stay blocked as it is today.
 - **History.** One snapshot holds the slot list, the `removed` flags and the selected slot ids.
-  - Each undoable edit (`remove_document`, `delete_selected`, `move_selected_to`) pushes the pre-edit snapshot onto
+  - Each undoable edit (`add_document`, `remove_document`, `delete_selected`, `move_selected_to`) pushes the pre-edit snapshot onto
     the undo stack, but only if it really changes something; the existing "no change, not dirty" rules apply. It
     then clears the redo stack.
   - The undo stack is capped at 50.
@@ -107,7 +113,6 @@ back, every page edit should also be undoable.
     them).
 - **Saved state.** The workspace keeps a counter that changes on every edit, undo and redo, plus the counter value
   at the last save. `is_dirty()` is true when they differ.
-  - Adding a document also changes the counter. It is not undoable, but it makes the workspace dirty, as today.
   - `mark_saved()` records the current value.
 
 ### UI
@@ -145,6 +150,9 @@ back, every page edit should also be undoable.
   made during a save.
 - **Removing a document with no pages left in the grid** still counts as an edit: its row disappears and the step is
   undoable. The toast then says 0 pages, using the plural form.
+- **Several files added at once** (a multi-file pick or a drop) are one undo step per file. The engine opens them
+  one at a time and reports each separately.
+- **Undoing an add shows no toast.** The sidebar row and the pages disappearing make the change visible.
 - **Names in the toast and tooltip** are the display names shown just before the removal.
 
 ## Left to the builder
