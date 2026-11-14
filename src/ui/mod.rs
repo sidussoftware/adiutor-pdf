@@ -263,6 +263,7 @@ impl AdiutorApp {
                     id: doc,
                     path,
                     page_sizes,
+                    removed: false,
                 }),
                 Event::Thumbnail {
                     page,

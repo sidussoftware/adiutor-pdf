@@ -23,6 +23,9 @@ pub struct SourceDoc {
     pub path: PathBuf,
     /// Page sizes in points (width, height).
     pub page_sizes: Vec<(f32, f32)>,
+    /// Hidden from the sidebar and the grid (removed or undone). Slots of a removed
+    /// document are gone; the entry stays so letters and ids are never reused.
+    pub removed: bool,
 }
 
 /// One open document as the sidebar shows it.
@@ -41,14 +44,48 @@ pub struct Slot {
     pub page: PageRef,
 }
 
-#[derive(Default)]
+/// Maximum number of undo steps kept.
+pub const HISTORY_LIMIT: usize = 50;
+
+/// One point in the undo history.
+#[derive(Clone)]
+struct State {
+    slots: Vec<Slot>,
+    /// `removed[i]` is the flag of `docs[i]`; documents past the end were not added yet.
+    removed: Vec<bool>,
+    selected: HashSet<SlotId>,
+    /// Identifies the content; equal revs mean the same saved-or-not state.
+    rev: u64,
+}
+
 pub struct Workspace {
     docs: Vec<SourceDoc>,
     slots: Vec<Slot>,
     selected: HashSet<SlotId>,
     anchor: Option<SlotId>,
     next_slot: u64,
-    dirty: bool,
+    undo: Vec<State>,
+    redo: Vec<State>,
+    rev: u64,
+    next_rev: u64,
+    saved_rev: Option<u64>,
+}
+
+impl Default for Workspace {
+    fn default() -> Self {
+        Self {
+            docs: Vec::new(),
+            slots: Vec::new(),
+            selected: HashSet::new(),
+            anchor: None,
+            next_slot: 0,
+            undo: Vec::new(),
+            redo: Vec::new(),
+            rev: 0,
+            next_rev: 1,
+            saved_rev: Some(0),
+        }
+    }
 }
 
 impl Workspace {
@@ -56,8 +93,93 @@ impl Workspace {
         Self::default()
     }
 
-    /// Appends all pages of `doc` to the grid and marks the workspace dirty.
-    pub fn add_document(&mut self, doc: SourceDoc) {
+    fn snapshot(&self) -> State {
+        State {
+            slots: self.slots.clone(),
+            removed: self.docs.iter().map(|d| d.removed).collect(),
+            selected: self.selected.clone(),
+            rev: self.rev,
+        }
+    }
+
+    /// Records `before` as an undo step after a real change.
+    fn commit(&mut self, before: State) {
+        self.undo.push(before);
+        if self.undo.len() > HISTORY_LIMIT {
+            self.undo.remove(0);
+        }
+        self.redo.clear();
+        self.rev = self.next_rev;
+        self.next_rev += 1;
+    }
+
+    /// Switches to `to` and returns the state that was left.
+    fn restore(&mut self, to: State) -> State {
+        let left = self.snapshot();
+        let gone: HashSet<SlotId> = left.slots.iter().map(|s| s.id).collect();
+        let back: HashSet<SlotId> = to
+            .slots
+            .iter()
+            .map(|s| s.id)
+            .filter(|id| !gone.contains(id))
+            .collect();
+        self.selected = if back.is_empty() { to.selected } else { back };
+        self.slots = to.slots;
+        for (i, d) in self.docs.iter_mut().enumerate() {
+            d.removed = to.removed.get(i).copied().unwrap_or(true);
+        }
+        self.rev = to.rev;
+        self.anchor = None;
+        left
+    }
+
+    pub fn undo(&mut self) -> bool {
+        let Some(to) = self.undo.pop() else {
+            return false;
+        };
+        let left = self.restore(to);
+        self.redo.push(left);
+        true
+    }
+
+    pub fn redo(&mut self) -> bool {
+        let Some(to) = self.redo.pop() else {
+            return false;
+        };
+        let left = self.restore(to);
+        self.undo.push(left);
+        true
+    }
+
+    pub fn can_undo(&self) -> bool {
+        !self.undo.is_empty()
+    }
+
+    pub fn can_redo(&self) -> bool {
+        !self.redo.is_empty()
+    }
+
+    /// Removes the document and its pages from the grid; returns how many pages went.
+    /// A no-op for an unknown or already removed document.
+    pub fn remove_document(&mut self, id: DocId) -> usize {
+        let Some(i) = self.docs.iter().position(|d| d.id == id && !d.removed) else {
+            return 0;
+        };
+        let before = self.snapshot();
+        let n = self.slots.len();
+        self.slots.retain(|s| s.page.doc != id);
+        let kept: HashSet<SlotId> = self.slots.iter().map(|s| s.id).collect();
+        self.selected.retain(|s| kept.contains(s));
+        self.anchor = None;
+        self.docs[i].removed = true;
+        self.commit(before);
+        n - self.slots.len()
+    }
+
+    /// Appends all pages of `doc` to the grid (an undoable step).
+    pub fn add_document(&mut self, mut doc: SourceDoc) {
+        let before = self.snapshot();
+        doc.removed = false;
         for index in 0..doc.page_sizes.len() as u32 {
             let id = SlotId(self.next_slot);
             self.next_slot += 1;
@@ -67,7 +189,7 @@ impl Workspace {
             });
         }
         self.docs.push(doc);
-        self.dirty = true;
+        self.commit(before);
     }
 
     pub fn doc(&self, id: DocId) -> Option<&SourceDoc> {
@@ -166,6 +288,7 @@ impl Workspace {
         if self.selected.is_empty() {
             return;
         }
+        let before = self.snapshot();
         let target = target.min(self.slots.len());
         let insert_at = (target..self.slots.len())
             .find(|&p| !self.is_selected(p))
@@ -182,7 +305,7 @@ impl Workspace {
             .ne(self.slots.iter().map(|s| s.id))
         {
             self.slots = rest;
-            self.dirty = true;
+            self.commit(before);
         }
     }
 
@@ -190,10 +313,11 @@ impl Workspace {
         if self.selected.is_empty() {
             return;
         }
+        let before = self.snapshot();
         let sel = std::mem::take(&mut self.selected);
         self.slots.retain(|s| !sel.contains(&s.id));
         self.anchor = None;
-        self.dirty = true;
+        self.commit(before);
     }
 
     pub fn pages_at(&self, positions: &[usize]) -> Vec<PageRef> {
@@ -205,13 +329,18 @@ impl Workspace {
 
     /// Open documents in opening order with their letter, display name and page count.
     pub fn doc_summaries(&self) -> Vec<DocSummary> {
-        let paths: Vec<PathBuf> = self.docs.iter().map(|d| d.path.clone()).collect();
-        let names = display_names(&paths);
-        self.docs
+        let shown: Vec<(usize, &SourceDoc)> = self
+            .docs
             .iter()
-            .zip(names)
             .enumerate()
-            .map(|(i, (d, name))| DocSummary {
+            .filter(|(_, d)| !d.removed)
+            .collect();
+        let paths: Vec<PathBuf> = shown.iter().map(|(_, d)| d.path.clone()).collect();
+        let names = display_names(&paths);
+        shown
+            .into_iter()
+            .zip(names)
+            .map(|((i, d), name)| DocSummary {
                 id: d.id,
                 letter: doc_letter(i),
                 name,
@@ -225,11 +354,11 @@ impl Workspace {
     }
 
     pub fn is_dirty(&self) -> bool {
-        self.dirty
+        self.saved_rev != Some(self.rev)
     }
 
     pub fn mark_saved(&mut self) {
-        self.dirty = false;
+        self.saved_rev = Some(self.rev);
     }
 
     /// True if `dest` is the file of one of the source documents.
@@ -381,6 +510,7 @@ mod tests {
                 id,
                 path: PathBuf::from(format!("d{id}.pdf")),
                 page_sizes: vec![(595.0, 842.0); n],
+                removed: false,
             });
         }
         ws
@@ -549,6 +679,7 @@ mod tests {
             id: 0,
             path: a,
             page_sizes: vec![(1.0, 1.0)],
+            removed: false,
         });
         assert!(ws.is_source_path(&dir.path().join(".").join("a.pdf")));
         assert!(!ws.is_source_path(&dir.path().join("b.pdf")));
@@ -577,5 +708,146 @@ mod tests {
         let s = ws.doc_summaries();
         assert_eq!(s[0].pages_in_grid, 1);
         assert_eq!((s[1].pages_in_grid, s[1].letter.as_str()), (0, "B"));
+    }
+
+    fn doc(id: usize, path: &str, n: usize) -> SourceDoc {
+        SourceDoc {
+            id,
+            path: PathBuf::from(path),
+            page_sizes: vec![(595.0, 842.0); n],
+            removed: false,
+        }
+    }
+
+    fn letters(ws: &Workspace) -> Vec<String> {
+        ws.doc_summaries().into_iter().map(|d| d.letter).collect()
+    }
+
+    #[test]
+    fn remove_document_drops_pages_and_hides_row() {
+        let mut ws = ws_with(&[3, 2]);
+        assert_eq!(ws.remove_document(0), 3);
+        assert_eq!(ws.slots().len(), 2);
+        assert_eq!(letters(&ws), ["B"]);
+        assert!(ws.can_undo());
+    }
+
+    #[test]
+    fn undo_restores_removed_document_and_selects_its_pages() {
+        let mut ws = ws_with(&[3, 2]);
+        ws.remove_document(0);
+        assert!(ws.undo());
+        assert_eq!(ws.slots().len(), 5);
+        assert_eq!(letters(&ws), ["A", "B"]);
+        assert_eq!(ws.selected_positions(), [0, 1, 2]);
+    }
+
+    #[test]
+    fn redo_reapplies_and_new_edit_clears_redo() {
+        let mut ws = ws_with(&[3, 2]);
+        ws.remove_document(0);
+        ws.undo();
+        assert!(ws.can_redo());
+        assert!(ws.redo());
+        assert_eq!(ws.slots().len(), 2);
+        ws.undo();
+        ws.select_only(0);
+        ws.delete_selected();
+        assert!(!ws.can_redo());
+    }
+
+    #[test]
+    fn undo_steps_back_strictly_in_order() {
+        let mut ws = ws_with(&[2, 2]);
+        ws.remove_document(0);
+        ws.add_document(doc(2, "d2.pdf", 1));
+        assert!(ws.undo());
+        assert_eq!(letters(&ws), ["B"]);
+        assert!(ws.undo());
+        assert_eq!(letters(&ws), ["A", "B"]);
+        assert_eq!(pages(&ws), [(0, 0), (0, 1), (1, 0), (1, 1)]);
+    }
+
+    #[test]
+    fn letters_are_never_reused() {
+        let mut ws = ws_with(&[1, 1]);
+        ws.undo();
+        ws.add_document(doc(2, "d2.pdf", 1));
+        assert_eq!(letters(&ws), ["A", "C"]);
+    }
+
+    #[test]
+    fn history_is_capped_at_50() {
+        let mut ws = ws_with(&[60]);
+        for _ in 0..51 {
+            ws.select_only(0);
+            ws.delete_selected();
+        }
+        assert_eq!((0..50).filter(|_| ws.undo()).count(), 50);
+        assert!(!ws.undo());
+    }
+
+    #[test]
+    fn undo_to_saved_state_is_clean() {
+        let mut ws = ws_with(&[3]);
+        ws.mark_saved();
+        ws.select_only(0);
+        ws.delete_selected();
+        assert!(ws.is_dirty());
+        ws.undo();
+        assert!(!ws.is_dirty());
+        ws.redo();
+        assert!(ws.is_dirty());
+    }
+
+    #[test]
+    fn noop_edits_push_no_history() {
+        let mut ws = ws_with(&[3]);
+        ws.delete_selected();
+        ws.select_only(1);
+        ws.move_selected_to(1);
+        assert_eq!(ws.remove_document(99), 0);
+        assert!(ws.undo());
+        assert!(!ws.undo());
+    }
+
+    #[test]
+    fn removing_document_with_no_pages_left_is_a_step() {
+        let mut ws = ws_with(&[2, 1]);
+        ws.set_selection(&[0, 1]);
+        ws.delete_selected();
+        assert_eq!(ws.remove_document(0), 0);
+        assert_eq!(letters(&ws), ["B"]);
+        assert!(ws.undo());
+        assert_eq!(letters(&ws), ["A", "B"]);
+    }
+
+    #[test]
+    fn undo_move_selects_moved_pages() {
+        let mut ws = ws_with(&[4]);
+        ws.set_selection(&[0, 1]);
+        ws.move_selected_to(4);
+        assert!(ws.undo());
+        assert_eq!(pages(&ws), [(0, 0), (0, 1), (0, 2), (0, 3)]);
+        assert_eq!(ws.selected_positions(), [0, 1]);
+    }
+
+    #[test]
+    fn display_names_ignore_removed_documents() {
+        let mut ws = Workspace::new();
+        ws.add_document(doc(0, "/a/x/c.pdf", 1));
+        ws.add_document(doc(1, "/b/y/c.pdf", 1));
+        ws.remove_document(0);
+        assert_eq!(ws.doc_summaries()[0].name, "c.pdf");
+    }
+
+    #[test]
+    fn undo_during_save_keeps_batch_check() {
+        let mut ws = ws_with(&[3]);
+        let saving = ws.all_pages();
+        ws.select_only(0);
+        ws.delete_selected();
+        ws.undo();
+        assert_eq!(ws.all_pages(), saving);
     }
 }
