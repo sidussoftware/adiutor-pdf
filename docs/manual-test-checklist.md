@@ -91,6 +91,7 @@ Generate a 300-page PDF: `python3 -c "from pypdf import PdfWriter as W; w=W(); [
 - [ ] Ctrl+Z inside the Pages field edits the text and does not undo the grid
 - [ ] Undoing back to the saved state: closing the window does not ask to discard changes
 - [ ] Undo or redo while a save is running does not break the save
+- [ ] After an undo during a save to the same file, closing the window asks to discard changes
 
 ## Notices and progress
 - [ ] Success notice appears top right and disappears after about 5 s; error notices stay until closed

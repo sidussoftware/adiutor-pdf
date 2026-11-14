@@ -368,6 +368,16 @@ impl Workspace {
         self.saved_rev = Some(self.rev);
     }
 
+    /// Identifies the current content, for `mark_saved_at`.
+    pub fn rev(&self) -> u64 {
+        self.rev
+    }
+
+    /// Marks the state that had `rev` as saved, e.g. when a save started there has finished.
+    pub fn mark_saved_at(&mut self, rev: u64) {
+        self.saved_rev = Some(rev);
+    }
+
     /// True if `dest` is the file of one of the source documents.
     pub fn is_source_path(&self, dest: &Path) -> bool {
         let Some(dest) = canonical(dest) else {
@@ -879,12 +889,17 @@ mod tests {
     }
 
     #[test]
-    fn undo_during_save_keeps_batch_check() {
+    fn save_finishing_after_undo_marks_the_written_state() {
         let mut ws = ws_with(&[3]);
-        let saving = ws.all_pages();
+        ws.mark_saved();
         ws.select_only(0);
         ws.delete_selected();
+        // A save of this state starts, then the user undoes before it finishes.
+        let r = ws.rev();
         ws.undo();
-        assert_eq!(ws.all_pages(), saving);
+        ws.mark_saved_at(r);
+        assert!(ws.is_dirty(), "the grid is in no file now");
+        ws.redo();
+        assert!(!ws.is_dirty());
     }
 }

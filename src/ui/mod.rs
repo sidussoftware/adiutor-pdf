@@ -49,6 +49,8 @@ pub struct AdiutorApp {
     next_job: u64,
     /// The running save or split, if any.
     batch: Option<Batch>,
+    /// `workspace.rev()` when the batch started: the state its files hold.
+    batch_rev: u64,
     /// Encrypted files waiting for a password (path, previous attempt was wrong).
     passwords: VecDeque<(PathBuf, bool)>,
     password_text: String,
@@ -148,6 +150,7 @@ impl AdiutorApp {
             pages_error: None,
             next_job: 0,
             batch: None,
+            batch_rev: 0,
             passwords: VecDeque::new(),
             password_text: String::new(),
             close_prompt: false,
@@ -362,6 +365,9 @@ impl AdiutorApp {
         }
         if outcome.mark_saved {
             self.workspace.mark_saved();
+        } else if outcome.wrote_all {
+            // The grid changed (e.g. undo) during the save: only the state it started from is on disk.
+            self.workspace.mark_saved_at(self.batch_rev);
         }
     }
 
@@ -380,6 +386,7 @@ impl AdiutorApp {
         let all = self.workspace.all_pages();
         let (batch, send) = Batch::new(jobs, all, split_folder, &mut self.next_job);
         self.batch = Some(batch);
+        self.batch_rev = self.workspace.rev();
         for (job, pages, dest) in send {
             self.send(Command::Save { job, pages, dest });
         }
