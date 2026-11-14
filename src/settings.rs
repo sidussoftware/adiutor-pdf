@@ -7,8 +7,20 @@ use std::path::{Path, PathBuf};
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct Settings {
+    #[serde(deserialize_with = "lenient")]
     pub language: LanguagePref,
+    #[serde(deserialize_with = "lenient")]
     pub theme: ThemePref,
+}
+
+/// A value this version does not know (e.g. written by a newer one) falls back to the field's
+/// default instead of discarding the whole file.
+fn lenient<'de, D, T>(d: D) -> Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de> + Default,
+{
+    Ok(toml::Value::deserialize(d)?.try_into().unwrap_or_default())
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -143,6 +155,17 @@ mod tests {
         std::fs::write(&p, "language = \"it\"\nfuture = 3").unwrap();
         let l = load_from(&p);
         assert_eq!(l.settings.language, LanguagePref::Italian);
+        assert!(!l.was_corrupt);
+    }
+
+    #[test]
+    fn unknown_value_defaults_only_that_field() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("settings.toml");
+        std::fs::write(&p, "language = \"it\"\ntheme = \"auto\"").unwrap();
+        let l = load_from(&p);
+        assert_eq!(l.settings.language, LanguagePref::Italian);
+        assert_eq!(l.settings.theme, ThemePref::System);
         assert!(!l.was_corrupt);
     }
 
