@@ -531,8 +531,11 @@ impl eframe::App for AdiutorApp {
             || !self.passwords.is_empty()
             || self.pending_overwrite.is_some()
             || self.blocked_save.is_some();
-        // Grid shortcuts only when no dialog is open and no text field has focus.
-        if !modal_open && !ctx.egui_wants_keyboard_input() {
+        // A page drag moves the selection: Delete, Select all, undo or redo mid-drag would change
+        // what it moves.
+        let blocked = modal_open || egui::DragAndDrop::has_any_payload(&ctx);
+        // Grid shortcuts only when nothing blocks them and no text field has focus.
+        if !blocked && !ctx.egui_wants_keyboard_input() {
             if ctx
                 .input(|i| i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace))
             {
@@ -543,8 +546,6 @@ impl eframe::App for AdiutorApp {
             }
         }
 
-        // A page drag drops the selection; undo or redo mid-drag would change what it moves.
-        let blocked = modal_open || egui::DragAndDrop::has_any_payload(&ctx);
         match history_shortcut(&ctx, blocked) {
             Some(true) => _ = self.workspace.redo(),
             Some(false) => _ = self.workspace.undo(),
