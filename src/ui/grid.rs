@@ -75,6 +75,53 @@ fn empty_state(ui: &mut egui::Ui, tr: &Tr) -> bool {
 
 type GridAction = Box<dyn FnOnce(&mut Workspace)>;
 
+/// Thumbnail height in points for a page of `w` x `h` points.
+fn thumb_height((w, h): (f32, f32)) -> f32 {
+    if w > 0.0 && h > 0.0 {
+        (THUMB_WIDTH * h / w).clamp(40.0, 400.0)
+    } else {
+        THUMB_WIDTH * 1.4
+    }
+}
+
+/// Where the grid's cells go, computed without widgets so only visible rows need any.
+struct GridLayout {
+    cols: usize,
+    /// (top, height) of each row, relative to the grid's top-left corner.
+    rows: Vec<(f32, f32)>,
+}
+
+impl GridLayout {
+    /// Same wrapping as a horizontal-wrapped row of `THUMB_WIDTH` cells with `GAP` spacing; each row
+    /// is as tall as its tallest cell plus the label.
+    fn new(heights: &[f32], width: f32) -> Self {
+        let cols = (((width + GAP) / (THUMB_WIDTH + GAP)).floor() as usize).max(1);
+        let mut top = 0.0;
+        let rows = heights
+            .chunks(cols)
+            .map(|row| {
+                let h = row.iter().copied().fold(0.0, f32::max) + LABEL_HEIGHT;
+                let r = (top, h);
+                top += h + GAP;
+                r
+            })
+            .collect();
+        GridLayout { cols, rows }
+    }
+
+    fn height(&self) -> f32 {
+        self.rows.last().map_or(0.0, |(top, h)| top + h)
+    }
+
+    /// The cell of grid position `pos`, whose page is `thumb_h` tall, centred vertically in its row.
+    fn cell(&self, origin: egui::Pos2, pos: usize, thumb_h: f32) -> egui::Rect {
+        let (top, row_h) = self.rows[pos / self.cols];
+        let size = vec2(THUMB_WIDTH, thumb_h + LABEL_HEIGHT);
+        let x = (pos % self.cols) as f32 * (THUMB_WIDTH + GAP);
+        egui::Rect::from_min_size(origin + vec2(x, top + (row_h - size.y) / 2.0), size)
+    }
+}
+
 impl AdiutorApp {
     pub(super) fn grid(&mut self, ui: &mut egui::Ui, docs: &[DocSummary]) {
         if self.workspace.is_empty() {
@@ -117,157 +164,161 @@ impl AdiutorApp {
                 bottom: 0,
             })
             .show(ui, |ui| {
-                ui.spacing_mut().item_spacing = vec2(GAP, GAP);
-                ui.horizontal_wrapped(|ui| {
-                    for (pos, slot) in self.workspace.slots().iter().enumerate() {
-                        let (w, h) = self.workspace.page_size(slot);
-                        let thumb_h = if w > 0.0 && h > 0.0 {
-                            (THUMB_WIDTH * h / w).clamp(40.0, 400.0)
-                        } else {
-                            THUMB_WIDTH * 1.4
-                        };
-                        let (rect, resp) = ui.allocate_exact_size(
-                            vec2(THUMB_WIDTH, thumb_h + LABEL_HEIGHT),
-                            Sense::click_and_drag(),
-                        );
-                        resp.dnd_set_drag_payload(pos);
-                        if resp.drag_started() && !self.workspace.is_selected(pos) {
-                            action = Some(Box::new(move |w| w.select_only(pos)));
-                        } else if resp.clicked() {
-                            action = Some(Box::new(move |w| {
-                                if mods.command {
-                                    w.toggle(pos)
-                                } else if mods.shift {
-                                    w.select_range_to(pos)
-                                } else {
-                                    w.select_only(pos)
-                                }
-                            }));
-                        }
-                        if dragging {
-                            cells.push(rect);
-                        }
-                        if !ui.is_rect_visible(rect) {
-                            continue;
-                        }
-                        let img_rect =
-                            egui::Rect::from_min_size(rect.min, vec2(THUMB_WIDTH, thumb_h));
-                        // The page as drawn: letterboxed texture, or the placeholder.
-                        let page_rect = match self.cache.get(&slot.page) {
-                            Some(tex) => {
-                                // Letterbox: the rendered bitmap can differ from the clamped cell.
-                                let size = tex.size_vec2();
-                                let scale =
-                                    (img_rect.width() / size.x).min(img_rect.height() / size.y);
-                                let r =
-                                    egui::Rect::from_center_size(img_rect.center(), size * scale);
-                                ui.painter().image(
-                                    tex.id(),
-                                    r,
-                                    egui::Rect::from_min_max(
-                                        egui::pos2(0.0, 0.0),
-                                        egui::pos2(1.0, 1.0),
-                                    ),
-                                    Color32::WHITE,
-                                );
-                                r
-                            }
-                            None => {
-                                ui.painter()
-                                    .rect_filled(img_rect, 2.0, Color32::from_gray(200));
-                                visible.push(slot.page);
-                                img_rect
-                            }
-                        };
-                        let selected = self.workspace.is_selected(pos);
-                        let doc = by_id.get(slot.page.doc).copied().flatten();
-                        // Thin border so white pages stand out; the selection frame is drawn outside it.
-                        ui.painter().rect_stroke(
-                            page_rect,
-                            0.0,
-                            egui::Stroke::new(1.0, pal.border_strong),
-                            egui::StrokeKind::Inside,
-                        );
-                        if let Some(d) = doc {
-                            let color = pal.doc_colors[d.id % pal.doc_colors.len()];
-                            let strip = egui::Rect::from_min_size(
-                                page_rect.min,
-                                vec2(page_rect.width(), STRIP_HEIGHT),
-                            );
-                            ui.painter().rect_filled(strip, 0.0, color);
-                            // The letter keeps the document identifiable without colour.
-                            let letter = ui.painter().layout_no_wrap(
-                                d.letter.clone(),
-                                egui::FontId::new(12.0, semibold_family()),
-                                tag_text_color(color),
-                            );
-                            let tag = egui::Rect::from_min_size(
-                                page_rect.min,
-                                vec2((letter.size().x + 8.0).max(18.0), 18.0),
-                            );
-                            ui.painter().rect_filled(tag, 0.0, color);
-                            ui.painter().galley(
-                                tag.center() - letter.size() / 2.0,
-                                letter,
-                                Color32::PLACEHOLDER,
-                            );
-                        }
-                        let accent = pal.accent;
-                        let number = ui.painter().layout_no_wrap(
-                            (pos + 1).to_string(),
-                            egui::FontId::proportional(13.0),
-                            if selected {
-                                pal.on_accent
-                            } else {
-                                ui.visuals().text_color()
-                            },
-                        );
-                        // Below the frame, which reaches 6 pt under the page.
-                        let number_rect = egui::Align2::CENTER_TOP.anchor_size(
-                            egui::pos2(rect.center().x, img_rect.max.y + 10.0),
-                            number.size(),
-                        );
-                        if selected {
-                            // Frame, pill and check badge, so selection is not color-only.
-                            let frame = page_rect.expand(3.0);
-                            ui.painter().rect_stroke(
-                                frame,
-                                6.0,
-                                egui::Stroke::new(3.0, accent),
-                                egui::StrokeKind::Outside,
-                            );
-                            let pill = number_rect.expand2(vec2(7.0, 1.0));
-                            ui.painter().rect_filled(pill, pill.height() / 2.0, accent);
-                            let c = frame.right_top();
-                            // Stroke is centred on the radius: accent disc of 10, ring out to 12.
-                            ui.painter().circle(
-                                c,
-                                11.0,
-                                accent,
-                                egui::Stroke::new(2.0, ui.visuals().panel_fill),
-                            );
-                            icons::check(
-                                ui.painter(),
-                                egui::Rect::from_center_size(c, vec2(12.0, 12.0)),
-                                pal.on_accent,
-                            );
-                        }
-                        ui.painter()
-                            .galley(number_rect.min, number, Color32::PLACEHOLDER);
-                        if let Some(d) = doc {
-                            // Built only while hovered.
-                            resp.on_hover_ui(|ui| {
-                                let page = (slot.page.index + 1).to_string();
-                                ui.label(self.tr.tf(
-                                    "grid.page_tooltip",
-                                    &[("file", &d.name), ("page", &page)],
-                                ));
-                            });
-                        }
-                    }
-                });
-                // Over a cell or a gap of the grid, the drop goes next to the nearest cell.
+                let slots = self.workspace.slots();
+                let heights: Vec<f32> = slots
+                    .iter()
+                    .map(|s| thumb_height(self.workspace.page_size(s)))
+                    .collect();
+                let layout = GridLayout::new(&heights, ui.available_width());
+                let origin = ui.cursor().min;
+                // Reserve the whole grid for scrolling; cells get widgets only when on screen.
+                ui.allocate_rect(
+                    egui::Rect::from_min_size(origin, vec2(ui.available_width(), layout.height())),
+                    Sense::hover(),
+                );
                 let clip = ui.clip_rect();
+                for (pos, slot) in slots.iter().enumerate() {
+                    let thumb_h = heights[pos];
+                    let rect = layout.cell(origin, pos, thumb_h);
+                    if dragging {
+                        cells.push(rect);
+                    }
+                    // Rows above or below the view: no widget, no drawing.
+                    if !clip.intersects(rect.expand(GAP)) {
+                        continue;
+                    }
+                    let resp = ui.interact(
+                        rect,
+                        egui::Id::NULL.with(("grid-cell", slot.id)),
+                        Sense::click_and_drag(),
+                    );
+                    resp.dnd_set_drag_payload(pos);
+                    if resp.drag_started() && !self.workspace.is_selected(pos) {
+                        action = Some(Box::new(move |w| w.select_only(pos)));
+                    } else if resp.clicked() {
+                        action = Some(Box::new(move |w| {
+                            if mods.command {
+                                w.toggle(pos)
+                            } else if mods.shift {
+                                w.select_range_to(pos)
+                            } else {
+                                w.select_only(pos)
+                            }
+                        }));
+                    }
+                    let img_rect = egui::Rect::from_min_size(rect.min, vec2(THUMB_WIDTH, thumb_h));
+                    // The page as drawn: letterboxed texture, or the placeholder.
+                    let page_rect = match self.cache.get(&slot.page) {
+                        Some(tex) => {
+                            // Letterbox: the rendered bitmap can differ from the clamped cell.
+                            let size = tex.size_vec2();
+                            let scale = (img_rect.width() / size.x).min(img_rect.height() / size.y);
+                            let r = egui::Rect::from_center_size(img_rect.center(), size * scale);
+                            ui.painter().image(
+                                tex.id(),
+                                r,
+                                egui::Rect::from_min_max(
+                                    egui::pos2(0.0, 0.0),
+                                    egui::pos2(1.0, 1.0),
+                                ),
+                                Color32::WHITE,
+                            );
+                            r
+                        }
+                        None => {
+                            ui.painter()
+                                .rect_filled(img_rect, 2.0, Color32::from_gray(200));
+                            visible.push(slot.page);
+                            img_rect
+                        }
+                    };
+                    let selected = self.workspace.is_selected(pos);
+                    let doc = by_id.get(slot.page.doc).copied().flatten();
+                    // Thin border so white pages stand out; the selection frame is drawn outside it.
+                    ui.painter().rect_stroke(
+                        page_rect,
+                        0.0,
+                        egui::Stroke::new(1.0, pal.border_strong),
+                        egui::StrokeKind::Inside,
+                    );
+                    if let Some(d) = doc {
+                        let color = pal.doc_colors[d.id % pal.doc_colors.len()];
+                        let strip = egui::Rect::from_min_size(
+                            page_rect.min,
+                            vec2(page_rect.width(), STRIP_HEIGHT),
+                        );
+                        ui.painter().rect_filled(strip, 0.0, color);
+                        // The letter keeps the document identifiable without colour.
+                        let letter = ui.painter().layout_no_wrap(
+                            d.letter.clone(),
+                            egui::FontId::new(12.0, semibold_family()),
+                            tag_text_color(color),
+                        );
+                        let tag = egui::Rect::from_min_size(
+                            page_rect.min,
+                            vec2((letter.size().x + 8.0).max(18.0), 18.0),
+                        );
+                        ui.painter().rect_filled(tag, 0.0, color);
+                        ui.painter().galley(
+                            tag.center() - letter.size() / 2.0,
+                            letter,
+                            Color32::PLACEHOLDER,
+                        );
+                    }
+                    let accent = pal.accent;
+                    let number = ui.painter().layout_no_wrap(
+                        (pos + 1).to_string(),
+                        egui::FontId::proportional(13.0),
+                        if selected {
+                            pal.on_accent
+                        } else {
+                            ui.visuals().text_color()
+                        },
+                    );
+                    // Below the frame, which reaches 6 pt under the page.
+                    let number_rect = egui::Align2::CENTER_TOP.anchor_size(
+                        egui::pos2(rect.center().x, img_rect.max.y + 10.0),
+                        number.size(),
+                    );
+                    if selected {
+                        // Frame, pill and check badge, so selection is not color-only.
+                        let frame = page_rect.expand(3.0);
+                        ui.painter().rect_stroke(
+                            frame,
+                            6.0,
+                            egui::Stroke::new(3.0, accent),
+                            egui::StrokeKind::Outside,
+                        );
+                        let pill = number_rect.expand2(vec2(7.0, 1.0));
+                        ui.painter().rect_filled(pill, pill.height() / 2.0, accent);
+                        let c = frame.right_top();
+                        // Stroke is centred on the radius: accent disc of 10, ring out to 12.
+                        ui.painter().circle(
+                            c,
+                            11.0,
+                            accent,
+                            egui::Stroke::new(2.0, ui.visuals().panel_fill),
+                        );
+                        icons::check(
+                            ui.painter(),
+                            egui::Rect::from_center_size(c, vec2(12.0, 12.0)),
+                            pal.on_accent,
+                        );
+                    }
+                    ui.painter()
+                        .galley(number_rect.min, number, Color32::PLACEHOLDER);
+                    if let Some(d) = doc {
+                        // Built only while hovered.
+                        resp.on_hover_ui(|ui| {
+                            let page = (slot.page.index + 1).to_string();
+                            ui.label(
+                                self.tr
+                                    .tf("grid.page_tooltip", &[("file", &d.name), ("page", &page)]),
+                            );
+                        });
+                    }
+                }
+                // Over a cell or a gap of the grid, the drop goes next to the nearest cell.
                 let pointer = ui.input(|i| i.pointer.interact_pos());
                 let nearest = pointer
                     .filter(|_| ui.rect_contains_pointer(clip))
@@ -350,5 +401,37 @@ mod tests {
         h.get_by_label("oppure");
         h.get_by_label("Aggiungi PDF");
         h.get_by_label_contains("I file originali non vengono mai modificati");
+    }
+
+    #[test]
+    fn layout_wraps_like_the_old_grid() {
+        // Exactly two cells fit in 2 * 150 + 24; one point less fits one.
+        assert_eq!(GridLayout::new(&[100.0; 4], 324.0).cols, 2);
+        assert_eq!(GridLayout::new(&[100.0; 4], 323.0).cols, 1);
+        // Never zero columns, even in a very narrow window.
+        assert_eq!(GridLayout::new(&[100.0], 10.0).cols, 1);
+    }
+
+    #[test]
+    fn layout_rows_take_the_tallest_cell_and_centre_the_others() {
+        let l = GridLayout::new(&[100.0, 200.0, 50.0], 324.0);
+        let row0 = 200.0 + LABEL_HEIGHT;
+        assert_eq!(l.rows, vec![(0.0, row0), (row0 + GAP, 50.0 + LABEL_HEIGHT)]);
+        assert_eq!(l.height(), row0 + GAP + 50.0 + LABEL_HEIGHT);
+        let o = egui::pos2(10.0, 20.0);
+        // Second cell: next column, top of its row.
+        assert_eq!(
+            l.cell(o, 1, 200.0).min,
+            egui::pos2(10.0 + THUMB_WIDTH + GAP, 20.0)
+        );
+        // First cell is 100 pt shorter than its row: centred, 50 pt down.
+        assert_eq!(l.cell(o, 0, 100.0).min, egui::pos2(10.0, 70.0));
+        // Third cell starts the second row.
+        assert_eq!(l.cell(o, 2, 50.0).min, egui::pos2(10.0, 20.0 + row0 + GAP));
+    }
+
+    #[test]
+    fn empty_layout_has_no_height() {
+        assert_eq!(GridLayout::new(&[], 800.0).height(), 0.0);
     }
 }
