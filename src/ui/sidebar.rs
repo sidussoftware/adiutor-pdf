@@ -5,6 +5,12 @@ use crate::workspace::{DocId, DocSummary};
 use egui::{Align, Layout, RichText, Sense, Stroke, vec2};
 use style::{palette, semibold};
 
+/// Height of the language and theme rows (2 x 40 + 8) plus the 16 pt gap above them.
+const SETTINGS_HEIGHT: f32 = 104.0;
+
+/// Width of the letter column in a document row; fits two letters.
+const LETTER_WIDTH: f32 = 28.0;
+
 /// The document rows; the empty hint is shown when there are none.
 /// Returns the id of the document whose × was clicked.
 pub(super) fn doc_list(ui: &mut egui::Ui, tr: &Tr, docs: &[DocSummary]) -> Option<DocId> {
@@ -25,8 +31,12 @@ pub(super) fn doc_list(ui: &mut egui::Ui, tr: &Tr, docs: &[DocSummary]) -> Optio
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 ui.horizontal(|ui| {
-                    // The letter identifies the document without relying on colour.
-                    ui.label(semibold(&d.letter, 14.0).color(pal.text));
+                    // The letter identifies the document without relying on colour. Fixed width, so
+                    // "AA" lines up with "A".
+                    ui.add_sized(
+                        vec2(LETTER_WIDTH, 20.0),
+                        egui::Label::new(semibold(&d.letter, 14.0).color(pal.text)),
+                    );
                     let (sw, _) = ui.allocate_exact_size(vec2(12.0, 12.0), Sense::hover());
                     ui.painter()
                         .rect_filled(sw, 3.0, pal.doc_colors[d.id % pal.doc_colors.len()]);
@@ -72,13 +82,11 @@ impl AdiutorApp {
             .exact_size(264.0)
             .resizable(false)
             .frame(frame)
+            // Built top to bottom so Tab follows the visual order; the list leaves room for the
+            // settings, which therefore sit at the bottom.
             .show(ui, |ui| {
-                ui.with_layout(Layout::bottom_up(Align::Min), |ui| {
-                    self.settings_combos(ui);
-                    ui.with_layout(Layout::top_down(Align::Min), |ui| {
-                        self.sidebar_top(ui, docs)
-                    });
-                });
+                self.sidebar_top(ui, docs);
+                self.settings_combos(ui);
             });
     }
 
@@ -105,8 +113,10 @@ impl AdiutorApp {
             });
         });
         let mut removed = None;
+        let list_height = (ui.available_height() - SETTINGS_HEIGHT).max(0.0);
         egui::ScrollArea::vertical()
             .auto_shrink(false)
+            .max_height(list_height)
             .show(ui, |ui| {
                 ui.spacing_mut().item_spacing.y = 0.0;
                 removed = doc_list(ui, &self.tr, docs);
@@ -169,23 +179,8 @@ impl AdiutorApp {
     /// Language and theme selectors, pinned to the bottom.
     fn settings_combos(&mut self, ui: &mut egui::Ui) {
         let mut next = self.settings.clone();
-        // Bottom-up: the theme row first, so Language ends up above it.
+        // Language above theme.
         ui.spacing_mut().item_spacing.y = 8.0;
-        ui.horizontal(|ui| {
-            let label = ui.add_sized(
-                vec2(64.0, 40.0),
-                egui::Label::new(self.tr.t("settings.theme")),
-            );
-            egui::ComboBox::from_id_salt("theme")
-                .selected_text(self.theme_label(next.theme))
-                .show_ui(ui, |ui| {
-                    for p in [ThemePref::System, ThemePref::Light, ThemePref::Dark] {
-                        ui.selectable_value(&mut next.theme, p, self.theme_label(p));
-                    }
-                })
-                .response
-                .labelled_by(label.id);
-        });
         ui.horizontal(|ui| {
             let label = ui.add_sized(
                 vec2(64.0, 40.0),
@@ -196,6 +191,21 @@ impl AdiutorApp {
                 .show_ui(ui, |ui| {
                     for p in LanguagePref::ALL {
                         ui.selectable_value(&mut next.language, p, self.lang_label(p));
+                    }
+                })
+                .response
+                .labelled_by(label.id);
+        });
+        ui.horizontal(|ui| {
+            let label = ui.add_sized(
+                vec2(64.0, 40.0),
+                egui::Label::new(self.tr.t("settings.theme")),
+            );
+            egui::ComboBox::from_id_salt("theme")
+                .selected_text(self.theme_label(next.theme))
+                .show_ui(ui, |ui| {
+                    for p in [ThemePref::System, ThemePref::Light, ThemePref::Dark] {
+                        ui.selectable_value(&mut next.theme, p, self.theme_label(p));
                     }
                 })
                 .response
