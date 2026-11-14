@@ -83,6 +83,15 @@ Generate a 300-page PDF: `python3 -c "from pypdf import PdfWriter as W; w=W(); [
 - [ ] Corrupt `settings.toml`: app starts with defaults; after changing a setting a `settings.toml.bak` copy exists
 - [ ] Read-only config folder: app still works
 
+## Remove document, undo and redo
+- [ ] The x on a sidebar document removes it and its pages and shows a notice with the undo shortcut
+- [ ] The remaining documents keep their letters
+- [ ] Ctrl+Z (Cmd+Z on macOS) undoes; Ctrl+Y or Ctrl+Shift+Z (Cmd+Shift+Z on macOS) redoes, for add, remove, delete and move
+- [ ] The undo and redo buttons are disabled when there is nothing to undo or redo
+- [ ] Ctrl+Z inside the Pages field edits the text and does not undo the grid
+- [ ] Undoing back to the saved state: closing the window does not ask to discard changes
+- [ ] Undo or redo while a save is running does not break the save
+
 ## Notices and progress
 - [ ] Success notice appears top right and disappears after about 5 s; error notices stay until closed
 - [ ] Progress card shows while saving a large file; Save PDF / Split are disabled meanwhile

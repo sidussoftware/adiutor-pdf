@@ -112,6 +112,16 @@ fn file_name(path: &Path) -> String {
         .map_or_else(String::new, |n| n.to_string_lossy().into_owned())
 }
 
+/// Keyboard shortcut text for "undo" or "redo" on this platform.
+fn shortcut(action: &str) -> &'static str {
+    match (action, cfg!(target_os = "macos")) {
+        ("undo", true) => "Cmd+Z",
+        ("undo", false) => "Ctrl+Z",
+        (_, true) => "Cmd+Shift+Z",
+        (_, false) => "Ctrl+Y",
+    }
+}
+
 impl AdiutorApp {
     pub fn new(
         ctx: &egui::Context,
@@ -163,6 +173,26 @@ impl AdiutorApp {
         {
             self.engine_died();
         }
+    }
+
+    /// Removes a document from the grid and says how to get it back.
+    fn remove_doc(&mut self, id: crate::workspace::DocId, docs: &[crate::workspace::DocSummary]) {
+        let Some(d) = docs.iter().find(|d| d.id == id) else {
+            return;
+        };
+        let n = self.workspace.remove_document(id);
+        let key = if n == 1 {
+            "toast.removed_one"
+        } else {
+            "toast.removed_many"
+        };
+        let args = vec![
+            ("file", d.name.clone()),
+            ("count", n.to_string()),
+            ("shortcut", shortcut("undo").to_string()),
+        ];
+        self.toasts
+            .push(ToastKind::Success, (key, args), Instant::now());
     }
 
     /// Removes every document and returns to the empty state; the app stays open.
@@ -507,6 +537,20 @@ impl eframe::App for AdiutorApp {
             && ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::A))
         {
             self.workspace.select_all();
+        }
+
+        if !modal_open && !ctx.egui_wants_keyboard_input() {
+            use egui::{Key, Modifiers};
+            let (cmd, shift) = (Modifiers::COMMAND, Modifiers::SHIFT);
+            let redo = ctx.input_mut(|i| {
+                i.consume_key(cmd | shift, Key::Z)
+                    || (!cfg!(target_os = "macos") && i.consume_key(cmd, Key::Y))
+            });
+            if redo {
+                self.workspace.redo();
+            } else if ctx.input_mut(|i| i.consume_key(cmd, Key::Z)) {
+                self.workspace.undo();
+            }
         }
 
         if let Err(reason) = &self.engine {

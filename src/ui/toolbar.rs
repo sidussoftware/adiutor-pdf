@@ -5,6 +5,22 @@ use style::palette;
 
 type IconFn = fn(&egui::Painter, egui::Rect, egui::Color32);
 
+/// The icon-only Undo and Redo buttons, in right-to-left order; returns (undo, redo) clicked.
+fn undo_redo_buttons(ui: &mut egui::Ui, tr: &Tr, can_undo: bool, can_redo: bool) -> (bool, bool) {
+    let name = |key: &str, action: &str| tr.tf(key, &[("shortcut", shortcut(action))]);
+    let redo = ui
+        .add_enabled_ui(can_redo, |ui| {
+            icons::icon_button(ui, icons::redo, &name("action.redo", "redo")).clicked()
+        })
+        .inner;
+    let undo = ui
+        .add_enabled_ui(can_undo, |ui| {
+            icons::icon_button(ui, icons::undo, &name("action.undo", "undo")).clicked()
+        })
+        .inner;
+    (undo, redo)
+}
+
 impl AdiutorApp {
     pub(super) fn toolbar(&mut self, ui: &mut egui::Ui) {
         let pal = palette(ui);
@@ -92,7 +108,42 @@ impl AdiutorApp {
                 ) {
                     self.split();
                 }
+                let (undo, redo) = undo_redo_buttons(
+                    ui,
+                    &self.tr,
+                    self.workspace.can_undo(),
+                    self.workspace.can_redo(),
+                );
+                if undo {
+                    self.workspace.undo();
+                }
+                if redo {
+                    self.workspace.redo();
+                }
             });
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::i18n::Lang;
+    use egui_kittest::Harness;
+    use egui_kittest::kittest::{NodeT, Queryable};
+
+    #[test]
+    fn undo_redo_disabled_without_history() {
+        let tr = Tr::new(Lang::It);
+        let mut h = Harness::builder()
+            .with_context_setup(crate::install_fonts)
+            .build_ui(|ui| {
+                undo_redo_buttons(ui, &tr, false, true);
+            });
+        h.run();
+        let undo = format!("Annulla ({})", shortcut("undo"));
+        let redo = format!("Ripristina ({})", shortcut("redo"));
+        assert!(h.get_by_label(&undo).accesskit_node().is_disabled());
+        assert!(!h.get_by_label(&redo).accesskit_node().is_disabled());
     }
 }
