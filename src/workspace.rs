@@ -115,7 +115,7 @@ impl Workspace {
 
     /// Switches to `to` and returns the state that was left.
     fn restore(&mut self, to: State) -> State {
-        let left = self.snapshot();
+        let mut left = self.snapshot();
         let gone: HashSet<SlotId> = left.slots.iter().map(|s| s.id).collect();
         let back: HashSet<SlotId> = to
             .slots
@@ -124,6 +124,13 @@ impl Workspace {
             .filter(|id| !gone.contains(id))
             .collect();
         self.selected = if back.is_empty() { to.selected } else { back };
+        // Coming back to the state being left should select what this step touched.
+        left.selected = self
+            .selected
+            .iter()
+            .filter(|s| gone.contains(s))
+            .copied()
+            .collect();
         self.slots = to.slots;
         for (i, d) in self.docs.iter_mut().enumerate() {
             d.removed = to.removed.get(i).copied().unwrap_or(true);
@@ -724,6 +731,34 @@ mod tests {
     }
 
     #[test]
+    fn redo_move_selects_moved_pages() {
+        let mut ws = ws_with(&[4]);
+        ws.set_selection(&[0, 1]);
+        ws.move_selected_to(4);
+        ws.select_only(3);
+        ws.undo();
+        assert!(ws.redo());
+        assert_eq!(pages(&ws), [(0, 2), (0, 3), (0, 0), (0, 1)]);
+        assert_eq!(ws.selected_positions(), [2, 3]);
+    }
+
+    #[test]
+    fn new_workspace_is_clean() {
+        assert!(!Workspace::new().is_dirty());
+    }
+
+    #[test]
+    fn undo_clears_anchor() {
+        let mut ws = ws_with(&[4]);
+        ws.select_only(0);
+        ws.delete_selected();
+        ws.select_only(2);
+        ws.undo();
+        ws.select_range_to(0); // no anchor: behaves like a plain click
+        assert_eq!(ws.selected_positions(), [0]);
+    }
+
+    #[test]
     fn remove_document_drops_pages_and_hides_row() {
         let mut ws = ws_with(&[3, 2]);
         assert_eq!(ws.remove_document(0), 3);
@@ -785,6 +820,7 @@ mod tests {
         }
         assert_eq!((0..50).filter(|_| ws.undo()).count(), 50);
         assert!(!ws.undo());
+        assert_eq!(ws.len(), 59);
     }
 
     #[test]
@@ -827,6 +863,7 @@ mod tests {
         let mut ws = ws_with(&[4]);
         ws.set_selection(&[0, 1]);
         ws.move_selected_to(4);
+        ws.select_only(3);
         assert!(ws.undo());
         assert_eq!(pages(&ws), [(0, 0), (0, 1), (0, 2), (0, 3)]);
         assert_eq!(ws.selected_positions(), [0, 1]);
