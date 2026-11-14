@@ -1,6 +1,6 @@
 # Remove a document, undo and redo — design
 
-Status: draft for owner approval. Part of issue sidussoftware/adiutor-pdf#6. The other two actions in #6 stay
+Status: approved by the owner (2026-11-14). Part of issue sidussoftware/adiutor-pdf#6. The other two actions in #6 stay
 open there: selecting a document's pages by clicking it, and reordering documents by dragging.
 
 ## Intent
