@@ -145,4 +145,5 @@ pub fn icon_button(ui: &mut eframe::egui::Ui, icon: IconFn, name: &str) -> efram
     )
     .accessible_name(name)
     .on_hover_text(name)
+    .on_disabled_hover_text(name)
 }

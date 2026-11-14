@@ -146,4 +146,20 @@ mod tests {
         assert!(h.get_by_label(&undo).accesskit_node().is_disabled());
         assert!(!h.get_by_label(&redo).accesskit_node().is_disabled());
     }
+
+    #[test]
+    fn disabled_undo_still_shows_its_tooltip() {
+        let tr = Tr::new(Lang::En);
+        let mut h = Harness::builder()
+            .with_context_setup(crate::install_fonts)
+            .build_ui(|ui| {
+                undo_redo_buttons(ui, &tr, false, false);
+            });
+        h.run();
+        let undo = format!("Undo ({})", shortcut("undo"));
+        h.get_by_label(&undo).hover();
+        h.run();
+        // The button's own accessible name plus the tooltip label.
+        assert_eq!(h.query_all_by_label(&undo).count(), 2);
+    }
 }

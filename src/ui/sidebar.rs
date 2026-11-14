@@ -58,7 +58,8 @@ pub(super) fn doc_list(ui: &mut egui::Ui, tr: &Tr, docs: &[DocSummary]) -> Optio
                     ui.painter()
                         .rect_filled(sw, 3.0, pal.doc_colors[d.id % pal.doc_colors.len()]);
                     // Leave room for the 40 px x button at the right end.
-                    let text_w = ui.available_width() - 40.0 - ui.spacing().item_spacing.x;
+                    let text_w =
+                        (ui.available_width() - 40.0 - ui.spacing().item_spacing.x).max(0.0);
                     ui.vertical(|ui| {
                         ui.set_width(text_w);
                         ui.spacing_mut().item_spacing.y = 2.0;
@@ -71,7 +72,9 @@ pub(super) fn doc_list(ui: &mut egui::Ui, tr: &Tr, docs: &[DocSummary]) -> Optio
                         );
                     });
                     let name = tr.tf("sidebar.remove", &[("file", &d.name)]);
-                    if icons::icon_button(ui, icons::close, &name).clicked() {
+                    let x = icons::icon_button(ui, icons::close, &name);
+                    // Later clicks of a double or triple click would hit the next row's x.
+                    if x.clicked() && !x.double_clicked() && !x.triple_clicked() {
                         removed = Some(d.id);
                     }
                 });
@@ -305,5 +308,31 @@ mod tests {
         h.run();
         drop(h);
         assert_eq!(removed, Some(7));
+    }
+
+    #[test]
+    fn double_or_triple_click_on_remove_removes_one_document() {
+        let tr = Tr::new(Lang::En);
+        let docs = vec![DocSummary {
+            id: 0,
+            letter: "A".into(),
+            name: "a.pdf".into(),
+            pages_in_grid: 1,
+        }];
+        let mut removals = 0;
+        let mut h = Harness::builder()
+            .with_context_setup(crate::install_fonts)
+            .with_step_dt(0.05)
+            .build_ui(|ui| {
+                removals += usize::from(doc_list(ui, &tr, &docs).is_some());
+            });
+        h.run();
+        // Three clicks well inside the double-click delay (0.3 s).
+        for _ in 0..3 {
+            h.get_by_label("Remove a.pdf").click();
+            h.step();
+        }
+        drop(h);
+        assert_eq!(removals, 1);
     }
 }

@@ -549,6 +549,7 @@ impl eframe::App for AdiutorApp {
         }
 
         let modal_open = self.close_prompt
+            || self.clear_prompt
             || !self.passwords.is_empty()
             || self.pending_overwrite.is_some()
             || self.blocked_save.is_some();
@@ -566,7 +567,9 @@ impl eframe::App for AdiutorApp {
             self.workspace.select_all();
         }
 
-        match history_shortcut(&ctx, modal_open) {
+        // A page drag drops the selection; undo or redo mid-drag would change what it moves.
+        let blocked = modal_open || egui::DragAndDrop::has_any_payload(&ctx);
+        match history_shortcut(&ctx, blocked) {
             Some(true) => _ = self.workspace.redo(),
             Some(false) => _ = self.workspace.undo(),
             None => {}
