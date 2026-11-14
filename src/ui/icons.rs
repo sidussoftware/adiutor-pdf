@@ -1,4 +1,5 @@
-//! Small stroke icons drawn with the painter. They are decorative: every button also has a text label.
+//! Small stroke icons drawn with the painter. Next to a text label they are decorative; icon-only
+//! buttons (`icon_button`) carry an accessible name and a tooltip instead.
 
 use eframe::egui::{Color32, Painter, Pos2, Rect, Stroke, pos2};
 
@@ -9,11 +10,11 @@ fn path(p: &Painter, rect: Rect, color: Color32, pts: &[(f32, f32)]) {
     let k = rect.width().min(rect.height()) / 24.0;
     let at = |&(x, y): &(f32, f32)| -> Pos2 { pos2(rect.min.x + x * k, rect.min.y + y * k) };
     let pts: Vec<Pos2> = pts.iter().map(at).collect();
-    p.line(pts.clone(), Stroke::new(WIDTH, color));
     // egui strokes have butt caps; a disc on every vertex rounds the caps and the joins.
-    for q in pts {
+    for &q in &pts {
         p.circle_filled(q, WIDTH / 2.0, color);
     }
+    p.line(pts, Stroke::new(WIDTH, color));
 }
 
 fn ring(p: &Painter, rect: Rect, color: Color32, (x, y): (f32, f32), r: f32) {
@@ -112,7 +113,7 @@ pub fn file_add(p: &Painter, rect: Rect, color: Color32) {
     path(p, rect, color, &[(10.0, 14.0), (12.5, 11.5), (15.0, 14.0)]);
 }
 
-type IconFn = fn(&Painter, Rect, Color32);
+pub type IconFn = fn(&Painter, Rect, Color32);
 
 pub fn glyph<'a>(icon: IconFn) -> eframe::egui::Atom<'a> {
     // Painted in the button's text colour, so disabled buttons fade it too.

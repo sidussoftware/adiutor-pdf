@@ -16,11 +16,11 @@ use crate::ranges::{self, RangeError};
 use crate::settings::{LanguagePref, Settings, ThemePref};
 use crate::thumb_cache::ThumbCache;
 use crate::toasts::{ToastKind, Toasts};
-use crate::workspace::{PageRef, SourceDoc, Workspace, free_split_names, split_stem};
+use crate::workspace::{PageRef, SourceDoc, Workspace, file_name, free_split_names, split_stem};
 use eframe::egui::{self, TextureHandle, TextureOptions};
 use std::collections::{HashSet, VecDeque};
 use std::ffi::OsString;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::Instant;
 use toasts::message_text;
 
@@ -109,9 +109,9 @@ fn apply_style(ctx: &egui::Context, pref: ThemePref) {
     ctx.set_theme(theme_preference(pref));
 }
 
-fn file_name(path: &Path) -> String {
-    path.file_name()
-        .map_or_else(String::new, |n| n.to_string_lossy().into_owned())
+/// The i18n key for `n` items: `one` when n == 1, `many` otherwise (0 included).
+fn plural(n: usize, one: &'static str, many: &'static str) -> &'static str {
+    if n == 1 { one } else { many }
 }
 
 /// Keyboard shortcut text for "undo" or "redo" on this platform.
@@ -184,11 +184,7 @@ impl AdiutorApp {
             return;
         };
         let n = self.workspace.remove_document(id);
-        let key = if n == 1 {
-            "toast.removed_one"
-        } else {
-            "toast.removed_many"
-        };
+        let key = plural(n, "toast.removed_one", "toast.removed_many");
         let args = vec![
             ("file", d.name.clone()),
             ("count", n.to_string()),
@@ -241,14 +237,6 @@ impl AdiutorApp {
         self.toasts.push(ToastKind::Error, message, Instant::now());
     }
 
-    fn lang_label(&self, p: LanguagePref) -> &str {
-        match p {
-            LanguagePref::System => self.tr.t("lang.system"),
-            LanguagePref::English => self.tr.t("lang.en"),
-            LanguagePref::Italian => self.tr.t("lang.it"),
-        }
-    }
-
     fn open(&mut self, path: PathBuf) {
         self.send(Command::Open {
             path,
@@ -285,60 +273,55 @@ impl AdiutorApp {
     }
 
     fn handle_event(&mut self, ctx: &egui::Context, event: Event) {
-        {
-            match event {
-                Event::Cleared => {}
-                Event::Opened {
-                    path,
-                    doc,
-                    page_sizes,
-                } => self.workspace.add_document(SourceDoc {
-                    id: doc,
-                    path,
-                    page_sizes,
-                    removed: false,
-                }),
-                Event::Thumbnail {
-                    page,
-                    width,
-                    height,
-                    rgba,
-                } => {
-                    let image = egui::ColorImage::from_rgba_unmultiplied(
-                        [width as usize, height as usize],
-                        &rgba,
-                    );
-                    let name = format!("thumb-{}-{}", page.doc, page.index);
-                    let tex = ctx.load_texture(name, image, TextureOptions::LINEAR);
-                    let bytes = width as usize * height as usize * 4;
-                    self.cache.insert(page, tex, bytes);
+        match event {
+            Event::Cleared => {}
+            Event::Opened {
+                path,
+                doc,
+                page_sizes,
+            } => self
+                .workspace
+                .add_document(SourceDoc::new(doc, path, page_sizes)),
+            Event::Thumbnail {
+                page,
+                width,
+                height,
+                rgba,
+            } => {
+                let image = egui::ColorImage::from_rgba_unmultiplied(
+                    [width as usize, height as usize],
+                    &rgba,
+                );
+                let name = format!("thumb-{}-{}", page.doc, page.index);
+                let tex = ctx.load_texture(name, image, TextureOptions::LINEAR);
+                let bytes = width as usize * height as usize * 4;
+                self.cache.insert(page, tex, bytes);
+            }
+            Event::OpenFailed { path, reason } => {
+                self.error(
+                    "open.failed",
+                    vec![("file", file_name(&path)), ("reason", reason)],
+                );
+            }
+            Event::PasswordRequired { path, wrong } => self.passwords.push_back((path, wrong)),
+            Event::SaveProgress { job, done, .. } => {
+                if let Some(b) = &mut self.batch {
+                    b.progress(job, done);
                 }
-                Event::OpenFailed { path, reason } => {
-                    self.error(
-                        "open.failed",
-                        vec![("file", file_name(&path)), ("reason", reason)],
-                    );
+            }
+            Event::Saved { job, dest } => {
+                if self.batch.as_ref().is_some_and(|b| !b.is_split()) {
+                    let msg = ("save.done", vec![("file", file_name(&dest))]);
+                    self.toasts.push(ToastKind::Success, msg, Instant::now());
                 }
-                Event::PasswordRequired { path, wrong } => self.passwords.push_back((path, wrong)),
-                Event::SaveProgress { job, done, .. } => {
-                    if let Some(b) = &mut self.batch {
-                        b.progress(job, done);
-                    }
-                }
-                Event::Saved { job, dest } => {
-                    if self.batch.as_ref().is_some_and(|b| !b.is_split()) {
-                        let msg = ("save.done", vec![("file", file_name(&dest))]);
-                        self.toasts.push(ToastKind::Success, msg, Instant::now());
-                    }
-                    self.finish_job(job, true);
-                }
-                Event::SaveFailed { job, dest, reason } => {
-                    self.error(
-                        "save.failed",
-                        vec![("file", file_name(&dest)), ("reason", reason)],
-                    );
-                    self.finish_job(job, false);
-                }
+                self.finish_job(job, true);
+            }
+            Event::SaveFailed { job, dest, reason } => {
+                self.error(
+                    "save.failed",
+                    vec![("file", file_name(&dest)), ("reason", reason)],
+                );
+                self.finish_job(job, false);
             }
         }
     }
@@ -354,11 +337,7 @@ impl AdiutorApp {
         };
         self.batch = None;
         if let Some((count, folder)) = outcome.split_done {
-            let key = if count == 1 {
-                "split.done_one"
-            } else {
-                "split.done"
-            };
+            let key = plural(count, "split.done_one", "split.done");
             let folder = folder.to_string_lossy().into_owned();
             let msg = (key, vec![("count", count.to_string()), ("folder", folder)]);
             self.toasts.push(ToastKind::Success, msg, Instant::now());
@@ -373,13 +352,12 @@ impl AdiutorApp {
 
     /// Sends one `Save` per (pages, dest) and starts tracking them as a batch.
     fn start_batch(&mut self, jobs: Vec<(Vec<PageRef>, PathBuf)>, split_folder: Option<PathBuf>) {
-        if jobs.iter().any(|(_, d)| self.workspace.is_source_path(d)) {
-            let file = jobs
-                .iter()
-                .map(|(_, d)| d)
-                .find(|d| self.workspace.is_source_path(d))
-                .map(|d| file_name(d))
-                .unwrap_or_default();
+        let blocked = jobs
+            .iter()
+            .map(|(_, d)| d)
+            .find(|d| self.workspace.is_source_path(d));
+        if let Some(dest) = blocked {
+            let file = file_name(dest);
             self.error("save.blocked_body", vec![("file", file)]);
             return;
         }
@@ -553,18 +531,16 @@ impl eframe::App for AdiutorApp {
             || !self.passwords.is_empty()
             || self.pending_overwrite.is_some()
             || self.blocked_save.is_some();
-        let delete = !modal_open
-            && !ctx.egui_wants_keyboard_input()
-            && ctx
-                .input(|i| i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace));
-        if delete {
-            self.workspace.delete_selected();
-        }
-        if !modal_open
-            && !ctx.egui_wants_keyboard_input()
-            && ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::A))
-        {
-            self.workspace.select_all();
+        // Grid shortcuts only when no dialog is open and no text field has focus.
+        if !modal_open && !ctx.egui_wants_keyboard_input() {
+            if ctx
+                .input(|i| i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace))
+            {
+                self.workspace.delete_selected();
+            }
+            if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::A)) {
+                self.workspace.select_all();
+            }
         }
 
         // A page drag drops the selection; undo or redo mid-drag would change what it moves.

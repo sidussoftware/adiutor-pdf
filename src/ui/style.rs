@@ -25,7 +25,53 @@ pub(super) fn primary(ui: &mut egui::Ui, pal: &Palette) {
 }
 
 pub(super) fn primary_text(text: &str) -> egui::RichText {
-    egui::RichText::new(text).family(egui::FontFamily::Name("semibold".into()))
+    egui::RichText::new(text).family(semibold_family())
+}
+
+/// Outline of a rounded rectangle as a closed polyline (for dashing).
+fn rounded_outline(r: egui::Rect, rad: f32) -> Vec<egui::Pos2> {
+    let mut pts = Vec::new();
+    for (corner, start) in [
+        (egui::pos2(r.max.x - rad, r.min.y + rad), 270.0_f32),
+        (egui::pos2(r.max.x - rad, r.max.y - rad), 0.0),
+        (egui::pos2(r.min.x + rad, r.max.y - rad), 90.0),
+        (egui::pos2(r.min.x + rad, r.min.y + rad), 180.0),
+    ] {
+        for i in 0..=8 {
+            let a = (start + i as f32 * 90.0 / 8.0).to_radians();
+            pts.push(corner + egui::vec2(a.cos(), a.sin()) * rad);
+        }
+    }
+    pts.push(pts[0]);
+    pts
+}
+
+/// Dashed outline of a rounded rectangle.
+pub(super) fn dashed_rect(
+    ui: &egui::Ui,
+    rect: egui::Rect,
+    radius: f32,
+    stroke: egui::Stroke,
+    dash: f32,
+    gap: f32,
+) {
+    ui.painter().extend(egui::Shape::dashed_line(
+        &rounded_outline(rect, radius),
+        stroke,
+        dash,
+        gap,
+    ));
+}
+
+/// Inter SemiBold (see `install_fonts`).
+pub(super) fn semibold_family() -> egui::FontFamily {
+    egui::FontFamily::Name(crate::SEMIBOLD.into())
+}
+
+pub(super) fn semibold(text: impl Into<String>, size: f32) -> egui::RichText {
+    egui::RichText::new(text)
+        .family(semibold_family())
+        .size(size)
 }
 
 #[cfg(test)]

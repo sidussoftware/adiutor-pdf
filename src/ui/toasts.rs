@@ -17,7 +17,7 @@ impl AdiutorApp {
         if progress.is_none() && self.toasts.items().next().is_none() {
             return;
         }
-        let pal = Palette::for_dark_mode(ui.visuals().dark_mode);
+        let pal = style::palette(ui);
         let area = ui.max_rect();
         let width = WIDTH.min(area.width() - 32.0).max(0.0);
         let mut close = None;
