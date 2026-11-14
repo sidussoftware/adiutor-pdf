@@ -12,6 +12,17 @@ const LABEL_HEIGHT: f32 = 28.0;
 /// Room for a selected cell's frame (6 pt) and badge (15 pt) without touching a neighbour.
 const GAP: f32 = 24.0;
 
+/// Corner radius of a page thumbnail.
+const PAGE_RADIUS: u8 = 4;
+
+/// What a thumbnail needs from its document, prepared once per frame.
+#[derive(Clone)]
+struct DocMark<'a> {
+    doc: &'a DocSummary,
+    color: Color32,
+    letter: std::sync::Arc<egui::Galley>,
+}
+
 /// Height of the document colour strip along the top of a page.
 const STRIP_HEIGHT: f32 = 4.0;
 
@@ -146,13 +157,23 @@ impl AdiutorApp {
         let dragging = egui::DragAndDrop::has_payload_of_type::<usize>(ui.ctx());
         let mods = ui.input(|i| i.modifiers);
         let pal = palette(ui);
-        // Summaries by DocId, so each thumbnail finds its document directly.
-        let mut by_id: Vec<Option<&DocSummary>> = Vec::new();
+        // By DocId: each document's summary, colour and laid-out letter, built once per frame.
+        let mut by_id: Vec<Option<DocMark>> = Vec::new();
         for d in docs {
             if by_id.len() <= d.id {
                 by_id.resize(d.id + 1, None);
             }
-            by_id[d.id] = Some(d);
+            let color = pal.doc_colors[d.id % pal.doc_colors.len()];
+            let letter = ui.painter().layout_no_wrap(
+                d.letter.clone(),
+                egui::FontId::new(12.0, semibold_family()),
+                tag_text_color(color),
+            );
+            by_id[d.id] = Some(DocMark {
+                doc: d,
+                color,
+                letter,
+            });
         }
         egui::ScrollArea::vertical()
             .auto_shrink(false)
@@ -214,54 +235,53 @@ impl AdiutorApp {
                             let size = tex.size_vec2();
                             let scale = (img_rect.width() / size.x).min(img_rect.height() / size.y);
                             let r = egui::Rect::from_center_size(img_rect.center(), size * scale);
-                            ui.painter().image(
-                                tex.id(),
-                                r,
-                                egui::Rect::from_min_max(
-                                    egui::pos2(0.0, 0.0),
-                                    egui::pos2(1.0, 1.0),
-                                ),
-                                Color32::WHITE,
-                            );
+                            egui::Image::new(egui::load::SizedTexture::from_handle(tex))
+                                .corner_radius(PAGE_RADIUS)
+                                .paint_at(ui, r);
                             r
                         }
                         None => {
-                            ui.painter()
-                                .rect_filled(img_rect, 2.0, Color32::from_gray(200));
+                            ui.painter().rect_filled(
+                                img_rect,
+                                PAGE_RADIUS,
+                                Color32::from_gray(200),
+                            );
                             visible.push(slot.page);
                             img_rect
                         }
                     };
                     let selected = self.workspace.is_selected(pos);
-                    let doc = by_id.get(slot.page.doc).copied().flatten();
+                    let mark = by_id.get(slot.page.doc).and_then(Option::as_ref);
                     // Thin border so white pages stand out; the selection frame is drawn outside it.
                     ui.painter().rect_stroke(
                         page_rect,
-                        0.0,
+                        PAGE_RADIUS,
                         egui::Stroke::new(1.0, pal.border_strong),
                         egui::StrokeKind::Inside,
                     );
-                    if let Some(d) = doc {
-                        let color = pal.doc_colors[d.id % pal.doc_colors.len()];
+                    if let Some(m) = mark {
+                        let top = egui::CornerRadius {
+                            nw: PAGE_RADIUS,
+                            ne: PAGE_RADIUS,
+                            sw: 0,
+                            se: 0,
+                        };
                         let strip = egui::Rect::from_min_size(
                             page_rect.min,
                             vec2(page_rect.width(), STRIP_HEIGHT),
                         );
-                        ui.painter().rect_filled(strip, 0.0, color);
+                        ui.painter().rect_filled(strip, top, m.color);
                         // The letter keeps the document identifiable without colour.
-                        let letter = ui.painter().layout_no_wrap(
-                            d.letter.clone(),
-                            egui::FontId::new(12.0, semibold_family()),
-                            tag_text_color(color),
-                        );
+                        let size = m.letter.size();
                         let tag = egui::Rect::from_min_size(
                             page_rect.min,
-                            vec2((letter.size().x + 8.0).max(18.0), 18.0),
+                            vec2((size.x + 8.0).max(18.0), 18.0),
                         );
-                        ui.painter().rect_filled(tag, 0.0, color);
+                        let corner = egui::CornerRadius { ne: 0, ..top };
+                        ui.painter().rect_filled(tag, corner, m.color);
                         ui.painter().galley(
-                            tag.center() - letter.size() / 2.0,
-                            letter,
+                            tag.center() - size / 2.0,
+                            m.letter.clone(),
                             Color32::PLACEHOLDER,
                         );
                     }
@@ -285,7 +305,7 @@ impl AdiutorApp {
                         let frame = page_rect.expand(3.0);
                         ui.painter().rect_stroke(
                             frame,
-                            6.0,
+                            PAGE_RADIUS + 3,
                             egui::Stroke::new(3.0, accent),
                             egui::StrokeKind::Outside,
                         );
@@ -307,7 +327,7 @@ impl AdiutorApp {
                     }
                     ui.painter()
                         .galley(number_rect.min, number, Color32::PLACEHOLDER);
-                    if let Some(d) = doc {
+                    if let Some(DocMark { doc: d, .. }) = mark {
                         // Built only while hovered.
                         resp.on_hover_ui(|ui| {
                             let page = (slot.page.index + 1).to_string();

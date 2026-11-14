@@ -509,30 +509,43 @@ pub fn file_name(path: &Path) -> String {
         .map_or_else(String::new, |n| n.to_string_lossy().into_owned())
 }
 
-/// File names; those that collide get " — " and the last two components of their parent folder.
+/// File names; those that collide get " — " and the last components of their parent folder: two,
+/// or more while two same-named files would still read the same.
 pub fn display_names(paths: &[PathBuf]) -> Vec<String> {
-    paths
+    let names: Vec<String> = paths.iter().map(|p| file_name(p)).collect();
+    let parents: Vec<Vec<String>> = paths
         .iter()
         .map(|p| {
-            let n = file_name(p);
-            if paths.iter().filter(|q| file_name(q) == n).count() < 2 {
-                return n;
-            }
-            let parent: Vec<_> = p
-                .parent()
+            p.parent()
                 .into_iter()
                 .flat_map(Path::components)
                 .filter_map(|c| match c {
                     std::path::Component::Normal(s) => Some(s.to_string_lossy().into_owned()),
                     _ => None,
                 })
-                .collect();
-            let tail = &parent[parent.len().saturating_sub(2)..];
-            if tail.is_empty() {
-                n
-            } else {
-                format!("{n} — {}", tail.join("/"))
+                .collect()
+        })
+        .collect();
+    let label = |i: usize, k: usize| {
+        let tail = &parents[i][parents[i].len().saturating_sub(k)..];
+        if tail.is_empty() {
+            names[i].clone()
+        } else {
+            format!("{} — {}", names[i], tail.join("/"))
+        }
+    };
+    (0..paths.len())
+        .map(|i| {
+            let same: Vec<usize> = (0..paths.len()).filter(|&j| names[j] == names[i]).collect();
+            if same.len() < 2 {
+                return names[i].clone();
             }
+            let deepest = same.iter().map(|&j| parents[j].len()).max().unwrap_or(0);
+            let mut k = 2;
+            while k < deepest && same.iter().any(|&j| j != i && label(j, k) == label(i, k)) {
+                k += 1;
+            }
+            label(i, k)
         })
         .collect()
 }
@@ -734,6 +747,20 @@ mod tests {
         let p = |s: &str| PathBuf::from(s);
         let got = display_names(&[p("/a/x/c.pdf"), p("/b/y/c.pdf"), p("/d.pdf")]);
         assert_eq!(got, ["c.pdf — a/x", "c.pdf — b/y", "d.pdf"]);
+    }
+
+    #[test]
+    fn display_names_grow_until_unique() {
+        let p = |s: &str| PathBuf::from(s);
+        // Same last two folders: a third component tells them apart.
+        let got = display_names(&[p("/a/x/y/c.pdf"), p("/b/x/y/c.pdf")]);
+        assert_eq!(got, ["c.pdf — a/x/y", "c.pdf — b/x/y"]);
+        // Three-way: only the pair that still collides grows.
+        let got = display_names(&[p("/a/x/y/c.pdf"), p("/b/x/y/c.pdf"), p("/q/z/c.pdf")]);
+        assert_eq!(got, ["c.pdf — a/x/y", "c.pdf — b/x/y", "c.pdf — q/z"]);
+        // Different depths: the shorter path stops at its root.
+        let got = display_names(&[p("/x/y/c.pdf"), p("/a/x/y/c.pdf")]);
+        assert_eq!(got, ["c.pdf — x/y", "c.pdf — a/x/y"]);
     }
 
     #[test]

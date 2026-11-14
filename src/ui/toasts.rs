@@ -72,7 +72,14 @@ fn stack(
                 // Not add_sized: its justified layout stretches the letters of wrapped text.
                 let top_down = egui::Layout::top_down(egui::Align::Min);
                 ui.allocate_ui_with_layout(egui::vec2(w, 0.0), top_down, |ui| {
-                    ui.add(egui::Label::new(message_text(tr, &t.msg)).wrap());
+                    let text = ui.add(egui::Label::new(message_text(tr, &t.msg)).wrap());
+                    // A live region: screen readers read a new toast out, errors right away.
+                    let live = match t.kind {
+                        ToastKind::Success => egui::accesskit::Live::Polite,
+                        ToastKind::Error => egui::accesskit::Live::Assertive,
+                    };
+                    ui.ctx()
+                        .accesskit_node_builder(text.id, |node| node.set_live(live));
                 });
                 if icons::icon_button(ui, icons::close, tr.t("common.close")).clicked() {
                     close = Some(t.id);
@@ -140,5 +147,35 @@ mod tests {
         h.run();
         drop(h);
         assert!(closed.is_some());
+    }
+
+    #[test]
+    fn new_toasts_are_live_regions() {
+        use egui::accesskit::Live;
+        use egui_kittest::kittest::by;
+        let mut toasts = crate::toasts::Toasts::default();
+        let now = Instant::now();
+        toasts.push(
+            ToastKind::Success,
+            ("save.done", vec![("file", "a.pdf".into())]),
+            now,
+        );
+        toasts.push(
+            ToastKind::Error,
+            ("save.done", vec![("file", "b.pdf".into())]),
+            now,
+        );
+        let tr = Tr::new(Lang::En);
+        let pal = Palette::light();
+        let mut h = Harness::builder()
+            .with_context_setup(crate::install_fonts)
+            .build_ui(|ui| {
+                stack(ui, &tr, &pal, None, &toasts);
+            });
+        h.run();
+        let live =
+            |text: &'static str, want: Live| by().label(text).predicate(move |n| n.live() == want);
+        h.get(live("Saved a.pdf", Live::Polite));
+        h.get(live("Saved b.pdf", Live::Assertive));
     }
 }

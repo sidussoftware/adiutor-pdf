@@ -4,17 +4,17 @@ use super::*;
 use icons::IconFn;
 use style::palette;
 
-/// The icon-only Undo and Redo buttons, in right-to-left order; returns (undo, redo) clicked.
+/// The icon-only Undo and Redo buttons, left to right; returns (undo, redo) clicked.
 fn undo_redo_buttons(ui: &mut egui::Ui, tr: &Tr, can_undo: bool, can_redo: bool) -> (bool, bool) {
     let name = |key: &str, action: &str| tr.tf(key, &[("shortcut", shortcut(action))]);
-    let redo = ui
-        .add_enabled_ui(can_redo, |ui| {
-            icons::icon_button(ui, icons::redo, &name("action.redo", "redo")).clicked()
-        })
-        .inner;
     let undo = ui
         .add_enabled_ui(can_undo, |ui| {
             icons::icon_button(ui, icons::undo, &name("action.undo", "undo")).clicked()
+        })
+        .inner;
+    let redo = ui
+        .add_enabled_ui(can_redo, |ui| {
+            icons::icon_button(ui, icons::redo, &name("action.redo", "redo")).clicked()
         })
         .inner;
     (undo, redo)
@@ -75,8 +75,40 @@ impl AdiutorApp {
             let btn = |ui: &mut egui::Ui, on: bool, icon: IconFn, text: egui::RichText| {
                 icons::button(ui, enabled(on), icon, text).clicked()
             };
-            // Right to left: the primary action is added first, so it sits at the far right.
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            // The right-hand group is built left to right, so Tab follows the visual order; it is
+            // pushed right by its width measured on the previous frame.
+            let width_id = egui::Id::NULL.with("toolbar-right-width");
+            let right_w: f32 = ui.data(|d| d.get_temp(width_id)).unwrap_or(0.0);
+            ui.add_space((ui.available_width() - right_w).max(0.0));
+            let group = ui.horizontal(|ui| {
+                let (undo, redo) = undo_redo_buttons(
+                    ui,
+                    &self.tr,
+                    self.workspace.can_undo(),
+                    self.workspace.can_redo(),
+                );
+                if undo {
+                    self.workspace.undo();
+                }
+                if redo {
+                    self.workspace.redo();
+                }
+                if btn(
+                    ui,
+                    any,
+                    icons::split,
+                    egui::RichText::new(self.tr.t("action.split")),
+                ) {
+                    self.split();
+                }
+                if btn(
+                    ui,
+                    sel,
+                    icons::save,
+                    egui::RichText::new(self.tr.t("action.save_selection")),
+                ) {
+                    self.save(true);
+                }
                 let primary = ui
                     .scope(|ui| {
                         style::primary(ui, &pal);
@@ -91,35 +123,13 @@ impl AdiutorApp {
                 if primary {
                     self.save(false);
                 }
-                if btn(
-                    ui,
-                    sel,
-                    icons::save,
-                    egui::RichText::new(self.tr.t("action.save_selection")),
-                ) {
-                    self.save(true);
-                }
-                if btn(
-                    ui,
-                    any,
-                    icons::split,
-                    egui::RichText::new(self.tr.t("action.split")),
-                ) {
-                    self.split();
-                }
-                let (undo, redo) = undo_redo_buttons(
-                    ui,
-                    &self.tr,
-                    self.workspace.can_undo(),
-                    self.workspace.can_redo(),
-                );
-                if undo {
-                    self.workspace.undo();
-                }
-                if redo {
-                    self.workspace.redo();
-                }
             });
+            let w = group.response.rect.width();
+            if (w - right_w).abs() > 0.5 {
+                // Changes only when the labels do (language, first frame): one extra frame.
+                ui.data_mut(|d| d.insert_temp(width_id, w));
+                ui.ctx().request_repaint();
+            }
         });
     }
 }
