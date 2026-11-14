@@ -474,6 +474,26 @@ impl AdiutorApp {
     }
 }
 
+/// Consumes an undo or redo shortcut: Some(true) = redo, Some(false) = undo. Does nothing when
+/// `blocked` or while a widget (e.g. the Pages field) has keyboard focus, so text keeps its own undo.
+fn history_shortcut(ctx: &egui::Context, blocked: bool) -> Option<bool> {
+    use egui::{Key, Modifiers};
+    if blocked || ctx.egui_wants_keyboard_input() {
+        return None;
+    }
+    let (cmd, shift) = (Modifiers::COMMAND, Modifiers::SHIFT);
+    ctx.input_mut(|i| {
+        // Redo first: Cmd+Z also matches Cmd+Shift+Z.
+        if i.consume_key(cmd | shift, Key::Z)
+            || (!cfg!(target_os = "macos") && i.consume_key(cmd, Key::Y))
+        {
+            Some(true)
+        } else {
+            i.consume_key(cmd, Key::Z).then_some(false)
+        }
+    })
+}
+
 impl AdiutorApp {
     /// True if closing now would lose something, so the close must be confirmed first.
     fn needs_close_confirm(&self) -> bool {
@@ -546,18 +566,10 @@ impl eframe::App for AdiutorApp {
             self.workspace.select_all();
         }
 
-        if !modal_open && !ctx.egui_wants_keyboard_input() {
-            use egui::{Key, Modifiers};
-            let (cmd, shift) = (Modifiers::COMMAND, Modifiers::SHIFT);
-            let redo = ctx.input_mut(|i| {
-                i.consume_key(cmd | shift, Key::Z)
-                    || (!cfg!(target_os = "macos") && i.consume_key(cmd, Key::Y))
-            });
-            if redo {
-                self.workspace.redo();
-            } else if ctx.input_mut(|i| i.consume_key(cmd, Key::Z)) {
-                self.workspace.undo();
-            }
+        match history_shortcut(&ctx, modal_open) {
+            Some(true) => _ = self.workspace.redo(),
+            Some(false) => _ = self.workspace.undo(),
+            None => {}
         }
 
         if let Err(reason) = &self.engine {
@@ -581,5 +593,67 @@ impl eframe::App for AdiutorApp {
         self.blocked_modal(&ctx);
         self.clear_modal(&ctx);
         self.close_modal(&ctx);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use egui::{Key, Modifiers};
+    use egui_kittest::Harness;
+    use egui_kittest::kittest::Queryable;
+
+    /// Everything `history_shortcut` reports for one key press (true = redo, false = undo).
+    fn press(modifiers: Modifiers, key: Key, blocked: bool) -> Vec<bool> {
+        let mut got = Vec::new();
+        let mut h = Harness::new_ui(|ui| {
+            got.extend(history_shortcut(ui.ctx(), blocked));
+        });
+        h.key_press_modifiers(modifiers, key);
+        h.run();
+        drop(h);
+        got
+    }
+
+    #[test]
+    fn command_z_undoes() {
+        assert_eq!(press(Modifiers::COMMAND, Key::Z, false), [false]);
+    }
+
+    #[test]
+    fn command_shift_z_redoes_and_does_not_undo() {
+        let cmd_shift = Modifiers::COMMAND | Modifiers::SHIFT;
+        assert_eq!(press(cmd_shift, Key::Z, false), [true]);
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn ctrl_y_redoes() {
+        assert_eq!(press(Modifiers::COMMAND, Key::Y, false), [true]);
+    }
+
+    #[test]
+    fn blocked_shortcuts_do_nothing() {
+        assert!(press(Modifiers::COMMAND, Key::Z, true).is_empty());
+    }
+
+    #[test]
+    fn focused_text_field_keeps_its_own_undo() {
+        let mut text = String::new();
+        let mut got = None;
+        let mut h = Harness::new_ui(|ui| {
+            got = got.or(history_shortcut(ui.ctx(), false));
+            ui.text_edit_singleline(&mut text).accessible_name("Pages");
+        });
+        h.get_by_label("Pages").focus();
+        h.run();
+        h.get_by_label("Pages").type_text("1-3");
+        h.run();
+        assert_eq!(h.get_by_label("Pages").value().as_deref(), Some("1-3"));
+        h.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+        h.run();
+        drop(h);
+        assert_eq!(got, None);
+        assert_eq!(text, "");
     }
 }
